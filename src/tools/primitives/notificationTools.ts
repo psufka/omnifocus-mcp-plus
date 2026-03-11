@@ -21,18 +21,17 @@ export async function listNotifications(params: { taskId?: string; taskName?: st
     const notifications = task.notifications.filter(() => true);
     const result = notifications.map((n, idx) => {
       const entry = { index: idx };
-      if (n.kind === Task.Notification.Kind.Absolute) {
-        entry.kind = 'absolute';
-        entry.date = n.date ? n.date.toISOString() : null;
-      } else if (n.kind === Task.Notification.Kind.DueRelative) {
-        entry.kind = 'relative';
-        entry.relativeOffsetSeconds = n.initialFireDate ? null : null;
-        // OmniJS stores relative offset; try to extract it
-        try {
-          // The offset is in seconds before due date (negative = before)
-          entry.relativeOffsetSeconds = n.relativeOffset;
-        } catch(e) {}
-      } else {
+      try {
+        const kindStr = String(n.kind);
+        if (kindStr.indexOf('DueRelative') !== -1) {
+          entry.kind = 'relative';
+          try { entry.relativeOffsetSeconds = n.relativeFireOffset; } catch(e) {}
+          try { entry.fireDate = n.initialFireDate ? n.initialFireDate.toISOString() : null; } catch(e) {}
+        } else {
+          entry.kind = 'absolute';
+          try { entry.date = n.initialFireDate ? n.initialFireDate.toISOString() : null; } catch(e) {}
+        }
+      } catch(e) {
         entry.kind = 'unknown';
       }
       return entry;
@@ -82,16 +81,13 @@ export async function addNotification(params: {
     }
     if (!task) return JSON.stringify({ success: false, error: 'Task not found' });
 
-    let notification;
     if (args.type === 'absolute') {
-      notification = new Task.Notification(new Date(args.date));
+      task.addNotification(new Date(args.date));
     } else {
       // relative: offset in seconds before due date (negative = before)
       const offsetSeconds = -(args.minutesBefore * 60);
-      notification = Task.Notification.withOffsetFromDueDate(offsetSeconds);
+      task.addNotification(offsetSeconds);
     }
-
-    task.addNotification(notification);
 
     return JSON.stringify({
       success: true,
