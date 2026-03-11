@@ -65,12 +65,24 @@ function generateAppleScript(params: RemoveItemParams): string {
         if foundItem is not missing value then
           set itemName to name of foundItem
           set itemId to id of foundItem as string
-          
+
+          -- JSON-escape itemName for safe embedding in return value
+          set prevDelims to AppleScript's text item delimiters
+          set AppleScript's text item delimiters to "\\\\"
+          set nameParts to text items of itemName
+          set AppleScript's text item delimiters to "\\\\\\\\"
+          set itemNameJson to nameParts as text
+          set AppleScript's text item delimiters to "\\""
+          set nameParts to text items of itemNameJson
+          set AppleScript's text item delimiters to "\\\\\\""
+          set itemNameJson to nameParts as text
+          set AppleScript's text item delimiters to prevDelims
+
           -- Delete the item
           delete foundItem
-          
+
           -- Return success
-          return "{\\\"success\\\":true,\\\"id\\\":\\"" & itemId & "\\",\\\"name\\\":\\"" & itemName & "\\"}"
+          return "{\\\"success\\\":true,\\\"id\\\":\\"" & itemId & "\\",\\\"name\\\":\\"" & itemNameJson & "\\"}"
         else
           -- Item not found
           return "{\\\"success\\\":false,\\\"error\\\":\\\"Item not found\\\"}"

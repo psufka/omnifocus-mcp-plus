@@ -1,8 +1,8 @@
 // OmniJS script to get inbox tasks from OmniFocus
 (() => {
   try {
-    // Use default values since parameters are not easily available in JXA mode
-    const hideCompleted = true; // Default to true
+    const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
+    const hideCompleted = args.hideCompleted !== undefined ? args.hideCompleted : true;
     
     // Helper function to format dates consistently
     function formatDate(date) {

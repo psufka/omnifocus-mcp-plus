@@ -2,6 +2,19 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.2.2] - 2026-03-11
+
+### Fixed
+- **OmniJS scripts now read injectedArgs** — `forecastTasks.js`, `flaggedTasks.js`, `inboxTasks.js` hardcoded params with `const` instead of reading `injectedArgs`. The `days`, `hideCompleted`, `projectFilter`, and `includeDeferredOnly` params passed by callers were silently ignored.
+- **`get_task_counts` deferred count** — was counting `Task.Status.Blocked` (sequential dependency) as "deferred". Now correctly counts tasks with a future defer date.
+- **`edit_item` tag replacement iteration bug** — forward iteration through `existingTags` while removing caused AppleScript to skip elements. Now iterates in reverse.
+- **JSON escaping in `editItem` and `removeItem`** — task names containing `"` or `\` produced malformed JSON. Now escaped via AppleScript text item delimiters before embedding in return strings.
+- **`executeJXA` temp file leak** — `unlinkSync` was not in a `finally` block, so temp files leaked when `JSON.parse` threw. Now matches `executeAppleScript`'s pattern.
+
+### Changed
+- **Removed unimplemented `filter_tasks` params** — `hasEstimate`, `estimateMin`, `estimateMax`, `hasNote`, `inInbox` were in the schema but never implemented. Removed for honest API surface.
+- **Perspective engine task limits raised** — `perspectiveEngine.ts` limits increased from 50/15 to 500/200 to avoid truncating perspectives with many tasks.
+
 ## [0.2.1] - 2026-03-11
 
 ### Fixed

@@ -57,7 +57,7 @@ export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<a
       total++;
       if (t.taskStatus === Task.Status.Available) available++;
       if (t.taskStatus === Task.Status.Completed) completed++;
-      if (t.taskStatus === Task.Status.Blocked) deferred++;
+      if (t.deferDate && new Date(t.deferDate) > now) deferred++;
       if (t.flagged) flagged++;
       if (t.dueDate) {
         if (t.dueDate < now && t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped) overdue++;

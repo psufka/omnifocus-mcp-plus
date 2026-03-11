@@ -202,6 +202,16 @@ The server uses two execution patterns:
 
 ## Changelog
 
+### v0.2.2
+
+- **Fix OmniJS scripts ignoring parameters** — `forecastTasks`, `flaggedTasks`, `inboxTasks` now read `injectedArgs` instead of hardcoding defaults
+- **Fix `get_task_counts` deferred count** — counts future defer dates instead of blocked status
+- **Fix tag replacement iteration bug** — reverse iteration prevents skipped elements
+- **Fix JSON escaping in AppleScript returns** — task names with `"` or `\` no longer break JSON
+- **Fix `executeJXA` temp file leak** — cleanup now in `finally` block
+- **Remove unimplemented `filter_tasks` params** — `hasEstimate`, `estimateMin`, `estimateMax`, `hasNote`, `inInbox`
+- **Raise perspective engine limits** — 50/15 → 500/200
+
 ### v0.2.0
 
 - **17 new tools** using OmniJS: append_to_note, uncomplete_task, set_task_repetition, list_projects, search_projects, get_project_counts, get_task_counts, folder CRUD (5 tools), tag CRUD (5 tools)
@@ -227,7 +237,6 @@ Fork of jqlts1/omnifocus-mcp-enhanced with:
 
 ## Known Limitations
 
-- **JSON injection in AppleScript return strings** — Task names containing `"` or `\` may produce malformed JSON from AppleScript-based tools. OmniJS-based tools (v0.2.0+) are not affected.
 - **`appleScriptDateCode` ignores timezone offset** — Works correctly when machine timezone matches the ISO string offset.
 - **Parameter injection in `executeOmniFocusScript` is fragile** — Uses regex replacement. OmniJS-based tools use direct JSON injection instead.
 

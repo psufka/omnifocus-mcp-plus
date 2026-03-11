@@ -60,12 +60,6 @@ export const schema = z.object({
   // Other filters
   flagged: z.boolean().optional().describe("Filter by flagged status"),
   searchText: z.string().optional().describe("Search in task names and notes"),
-  hasEstimate: z.boolean().optional().describe("Filter tasks that have time estimates"),
-  estimateMin: z.number().optional().describe("Minimum estimated minutes"),
-  estimateMax: z.number().optional().describe("Maximum estimated minutes"),
-  hasNote: z.boolean().optional().describe("Filter tasks that have notes"),
-  inInbox: z.boolean().optional().describe("Filter tasks in inbox"),
-
   // Output controls
   limit: z.number().max(1000).optional().describe("Maximum number of tasks to return (default: 100)"),
   sortBy: z.enum(["name", "dueDate", "deferDate", "plannedDate", "completedDate", "flagged", "project"]).optional().describe("Sort results by field"),

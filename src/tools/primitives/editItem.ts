@@ -398,9 +398,10 @@ ${datePreamble}
           set tagNames to {${tagsList}}
           set existingTags to tags of foundItem
 
-          -- First clear all existing tags
-          repeat with existingTag in existingTags
-            remove existingTag from tags of foundItem
+          -- Clear existing tags in reverse to avoid iteration bug
+          set tagCount to count of existingTags
+          repeat with i from tagCount to 1 by -1
+            remove (item i of existingTags) from tags of foundItem
           end repeat
 
           -- Then add new tags
@@ -511,8 +512,20 @@ ${datePreamble}
             end if
           end repeat
 
+          -- JSON-escape itemName for safe embedding in return value
+          set prevDelims to AppleScript's text item delimiters
+          set AppleScript's text item delimiters to "\\\\"
+          set nameParts to text items of itemName
+          set AppleScript's text item delimiters to "\\\\\\\\"
+          set itemNameJson to nameParts as text
+          set AppleScript's text item delimiters to "\\""
+          set nameParts to text items of itemNameJson
+          set AppleScript's text item delimiters to "\\\\\\""
+          set itemNameJson to nameParts as text
+          set AppleScript's text item delimiters to prevDelims
+
           -- Return success with details
-          return "{\\\"success\\\":true,\\\"id\\\":\\"" & itemId & "\\",\\\"name\\\":\\"" & itemName & "\\",\\\"changedProperties\\\":\\"" & changedPropsText & "\\"}"
+          return "{\\\"success\\\":true,\\\"id\\\":\\"" & itemId & "\\",\\\"name\\\":\\"" & itemNameJson & "\\",\\\"changedProperties\\\":\\"" & changedPropsText & "\\"}"
         else
           -- Item not found
           return "{\\\"success\\\":false,\\\"error\\\":\\\"Item not found\\\"}"

@@ -49,11 +49,6 @@ export interface FilterTasksOptions {
   // Other dimensions
   flagged?: boolean;
   searchText?: string;
-  hasEstimate?: boolean;
-  estimateMin?: number;
-  estimateMax?: number;
-  hasNote?: boolean;
-  inInbox?: boolean;
 
   // Output control
   limit?: number;
@@ -492,18 +487,6 @@ function buildFilterSummary(options: FilterTasksOptions): string {
   else if (options.plannedThisMonth) conditions.push('Planned: This Month');
   else if (options.plannedBefore) conditions.push(`Planned Before: ${options.plannedBefore}`);
   else if (options.plannedAfter) conditions.push(`Planned After: ${options.plannedAfter}`);
-
-  if (options.estimateMin !== undefined || options.estimateMax !== undefined) {
-    let estimate = 'Estimate: ';
-    if (options.estimateMin !== undefined && options.estimateMax !== undefined) {
-      estimate += `${options.estimateMin}-${options.estimateMax}min`;
-    } else if (options.estimateMin !== undefined) {
-      estimate += `≥${options.estimateMin}min`;
-    } else {
-      estimate += `≤${options.estimateMax}min`;
-    }
-    conditions.push(estimate);
-  }
 
   if (options.searchText) {
     conditions.push(`Search: "${options.searchText}"`);

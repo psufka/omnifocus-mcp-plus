@@ -279,10 +279,10 @@ export class PerspectiveEngine {
           console.log("Total task count:", tasks.length);
 
           // For "Daily Review", we should fetch completed tasks
-          var maxTasks = Math.min(50, tasks.length);
+          var maxTasks = Math.min(500, tasks.length);
           var foundCount = 0;
 
-          for (var i = 0; i < maxTasks && foundCount < 15; i++) {
+          for (var i = 0; i < maxTasks && foundCount < 200; i++) {
             var task = tasks[i];
 
             // Simple filter logic: if "Daily Review", get completed tasks
@@ -385,8 +385,8 @@ export class PerspectiveEngine {
           var tasks = doc.flattenedTasks;
           var result = [];
 
-          // Limit to first 50 tasks to avoid performance issues
-          var maxTasks = Math.min(50, tasks.length);
+          // Limit to first 500 tasks to avoid performance issues
+          var maxTasks = Math.min(500, tasks.length);
           console.log("Total tasks found:", tasks.length);
           console.log("Tasks to fetch:", maxTasks);
 

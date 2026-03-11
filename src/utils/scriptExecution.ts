@@ -40,40 +40,28 @@ export async function executeAppleScript(script: string): Promise<string> {
 
 // Helper function to execute OmniFocus scripts
 export async function executeJXA(script: string): Promise<any[]> {
+  const tempFile = join(tmpdir(), `jxa_script_${Date.now()}.js`);
   try {
-    // Write the script to a temporary file in the system temp directory
-    const tempFile = join(tmpdir(), `jxa_script_${Date.now()}.js`);
-    
-    // Write the script to the temporary file
     writeFileSync(tempFile, script);
-    
-    // Execute the script using osascript
     const { stdout, stderr } = await execAsync(`osascript -l JavaScript "${tempFile}"`);
-    
     if (stderr) {
       console.error("Script stderr output:", stderr);
     }
-    
-    // Clean up the temporary file
-    unlinkSync(tempFile);
-    
-    // Parse the output as JSON
     try {
       const result = JSON.parse(stdout);
       return result;
     } catch (e) {
       console.error("Failed to parse script output as JSON:", e);
-      
-      // If this contains a "Found X tasks" message, treat it as a successful non-JSON response
       if (stdout.includes("Found") && stdout.includes("tasks")) {
         return [];
       }
-      
       return [];
     }
   } catch (error) {
     console.error("Failed to execute JXA script:", error);
     throw error;
+  } finally {
+    try { unlinkSync(tempFile); } catch {}
   }
 }
 

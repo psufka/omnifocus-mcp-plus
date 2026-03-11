@@ -1,10 +1,10 @@
 // OmniJS script to get forecast tasks from OmniFocus
 (() => {
   try {
-    // Use default values since parameters are not easily available in JXA mode
-    const days = 7;
-    const hideCompleted = true; // Default to true
-    const includeDeferredOnly = false;
+    const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
+    const days = args.days || 7;
+    const hideCompleted = args.hideCompleted !== undefined ? args.hideCompleted : true;
+    const includeDeferredOnly = args.includeDeferredOnly !== undefined ? args.includeDeferredOnly : false;
     
     // Helper function to format dates consistently
     function formatDate(date) {
