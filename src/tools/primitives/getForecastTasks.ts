@@ -45,7 +45,8 @@ export async function getForecastTasks(options: GetForecastTasksOptions = {}): P
             const tasks = data.tasksByDate[dateStr];
             if (!tasks || tasks.length === 0) return;
             
-            const taskDate = new Date(dateStr);
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const taskDate = new Date(y, m - 1, d);
             const isToday = taskDate.getTime() === today.getTime();
             const isTomorrow = taskDate.getTime() === today.getTime() + 24 * 60 * 60 * 1000;
             const isOverdue = taskDate < today;
