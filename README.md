@@ -76,6 +76,123 @@ Restart Claude Code to pick up the new server.
 | `update_tag` | Update tag name or status |
 | `delete_tag` | Delete a tag |
 
+## Usage Examples
+
+All tools are called automatically by Claude via MCP. The examples below show the tool parameters for common operations.
+
+### Tasks
+
+**Add a task with a due date and tags:**
+```json
+{
+  "name": "Review quarterly report",
+  "dueDate": "2026-03-15T17:00:00-05:00",
+  "tags": ["Work", "Urgent"],
+  "projectName": "Q1 Review"
+}
+```
+
+**Set a task to repeat every weekday:**
+```json
+{
+  "task_id": "abc123",
+  "rule_string": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+  "schedule_type": "regularly"
+}
+```
+
+**Set a task to repeat 3 days after completion:**
+```json
+{
+  "task_id": "abc123",
+  "rule_string": "FREQ=DAILY;INTERVAL=3",
+  "schedule_type": "from_completion"
+}
+```
+
+**Append to a task's note (without overwriting):**
+```json
+{
+  "object_type": "task",
+  "object_id": "abc123",
+  "text": "\nUpdated 2026-03-10: waiting on response"
+}
+```
+
+### Projects
+
+**List stalled projects (active but stuck):**
+```json
+{ "stalledOnly": true }
+```
+
+**List projects in a folder sorted by remaining tasks:**
+```json
+{
+  "folder": "Work",
+  "status": "active",
+  "sortBy": "remainingTaskCount",
+  "sortOrder": "desc"
+}
+```
+
+### Folders & Tags
+
+**Create a nested folder:**
+```json
+{ "name": "Q2 Projects", "parent": "Work" }
+```
+
+**Create a nested tag:**
+```json
+{ "name": "Urgent", "parent": "Priority" }
+```
+
+**Put a tag on hold:**
+```json
+{ "name_or_id": "Waiting", "status": "on_hold" }
+```
+
+### Filtering
+
+**Get overdue tasks in a specific project:**
+```json
+{
+  "overdue": true,
+  "projectFilter": "Home Renovation"
+}
+```
+
+**Get tasks due this week with a specific tag:**
+```json
+{
+  "dueThisWeek": true,
+  "tagFilter": "Work"
+}
+```
+
+### Date Format
+
+All dates must use full ISO 8601 with timezone offset. Bare dates like `2026-03-15` resolve to UTC midnight and display as the wrong day in local time.
+
+```
+"2026-03-15T17:00:00-05:00"   (CDT)
+"2026-03-15T17:00:00-06:00"   (CST)
+```
+
+### RRULE Reference
+
+The `set_task_repetition` tool uses [iCal RRULE](https://icalendar.org/iCalendar-RFC-5545/3-8-5-3-recurrence-rule.html) syntax:
+
+| Pattern | RRULE |
+|---------|-------|
+| Daily | `FREQ=DAILY;INTERVAL=1` |
+| Every 3 days | `FREQ=DAILY;INTERVAL=3` |
+| Weekly on Mon/Wed/Fri | `FREQ=WEEKLY;BYDAY=MO,WE,FR` |
+| Biweekly | `FREQ=WEEKLY;INTERVAL=2` |
+| Monthly on the 1st | `FREQ=MONTHLY;BYMONTHDAY=1` |
+| Yearly | `FREQ=YEARLY;INTERVAL=1` |
+
 ## Architecture
 
 The server uses two execution patterns:
@@ -113,6 +230,19 @@ Fork of jqlts1/omnifocus-mcp-enhanced with:
 - **JSON injection in AppleScript return strings** — Task names containing `"` or `\` may produce malformed JSON from AppleScript-based tools. OmniJS-based tools (v0.2.0+) are not affected.
 - **`appleScriptDateCode` ignores timezone offset** — Works correctly when machine timezone matches the ISO string offset.
 - **Parameter injection in `executeOmniFocusScript` is fragile** — Uses regex replacement. OmniJS-based tools use direct JSON injection instead.
+
+## Contributing
+
+PRs welcome! The codebase has two patterns for adding tools:
+
+1. **OmniJS tools** (preferred for new tools) — write inline JavaScript that runs inside OmniFocus via `runOmniJs()`. No escaping issues, full access to the OmniJS API. See `src/tools/primitives/folderTools.ts` for examples.
+2. **AppleScript tools** (legacy) — used by the original tools. More fragile due to escaping but still works.
+
+To add a new tool:
+1. Create a primitive in `src/tools/primitives/yourTool.ts`
+2. Create a definition in `src/tools/definitions/yourTool.ts` (Zod schema + handler)
+3. Register in `src/server.ts`
+4. `npm run build && npm test`
 
 ## Credits
 
