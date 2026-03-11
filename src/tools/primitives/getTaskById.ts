@@ -96,22 +96,43 @@ function generateGetTaskScript(params: GetTaskByIdParams): string {
         set taskDeferDate to ""
         set taskPlannedDate to ""
         set taskEstimatedMinutes to ""
-        
+
         try
           if due date of theTask is not missing value then
-            set taskDueDate to (due date of theTask) as string
+            set d to due date of theTask
+            set y to year of d as string
+            set m to text -2 thru -1 of ("0" & ((month of d) as integer))
+            set dy to text -2 thru -1 of ("0" & (day of d))
+            set h to text -2 thru -1 of ("0" & (hours of d))
+            set mn to text -2 thru -1 of ("0" & (minutes of d))
+            set s to text -2 thru -1 of ("0" & (seconds of d))
+            set taskDueDate to y & "-" & m & "-" & dy & "T" & h & ":" & mn & ":" & s
           end if
         end try
-        
+
         try
           if defer date of theTask is not missing value then
-            set taskDeferDate to (defer date of theTask) as string
+            set d to defer date of theTask
+            set y to year of d as string
+            set m to text -2 thru -1 of ("0" & ((month of d) as integer))
+            set dy to text -2 thru -1 of ("0" & (day of d))
+            set h to text -2 thru -1 of ("0" & (hours of d))
+            set mn to text -2 thru -1 of ("0" & (minutes of d))
+            set s to text -2 thru -1 of ("0" & (seconds of d))
+            set taskDeferDate to y & "-" & m & "-" & dy & "T" & h & ":" & mn & ":" & s
           end if
         end try
 
         try
           if planned date of theTask is not missing value then
-            set taskPlannedDate to (planned date of theTask) as string
+            set d to planned date of theTask
+            set y to year of d as string
+            set m to text -2 thru -1 of ("0" & ((month of d) as integer))
+            set dy to text -2 thru -1 of ("0" & (day of d))
+            set h to text -2 thru -1 of ("0" & (hours of d))
+            set mn to text -2 thru -1 of ("0" & (minutes of d))
+            set s to text -2 thru -1 of ("0" & (seconds of d))
+            set taskPlannedDate to y & "-" & m & "-" & dy & "T" & h & ":" & mn & ":" & s
           end if
         end try
         
