@@ -2,6 +2,11 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.3.1] - 2026-03-11
+
+### Added
+- **`reorder_task`** (41 total) — reorder a task within its container: move before/after a sibling, or to beginning/ending. Controls next action in sequential projects.
+
 ## [0.3.0] - 2026-03-11
 
 ### Added

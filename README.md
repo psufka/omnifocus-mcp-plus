@@ -1,6 +1,6 @@
 # OmniFocus MCP Plus
 
-A comprehensive MCP server for OmniFocus 4 with 40 tools covering task management, project/folder/tag CRUD, custom perspectives, notifications, and advanced filtering.
+A comprehensive MCP server for OmniFocus 4 with 41 tools covering task management, project/folder/tag CRUD, custom perspectives, notifications, and advanced filtering.
 
 Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
@@ -20,7 +20,7 @@ claude mcp add omnifocus -- node "$(pwd)/dist/server.js"
 
 Restart Claude Code to pick up the new server.
 
-## Tools (40)
+## Tools (41)
 
 ### Task Management
 | Tool | Description |
@@ -38,6 +38,7 @@ Restart Claude Code to pick up the new server.
 | `batch_add_items` | Add multiple tasks/projects in one call |
 | `batch_remove_items` | Remove multiple items in one call |
 | `batch_move_tasks` | Move multiple tasks to a destination in one call |
+| `reorder_task` | Reorder task within its container: before/after sibling, or beginning/ending |
 
 ### Task Queries
 | Tool | Description |
@@ -208,6 +209,10 @@ The `set_task_repetition` tool uses [iCal RRULE](https://icalendar.org/iCalendar
 All tools use **OmniJS via JXA** — inline JavaScript executed inside OmniFocus via `runOmniJs()`. No AppleScript escaping issues, native access to all OmniJS APIs. Query tools use external `.js` scripts in `src/utils/omnifocusScripts/` loaded via `executeOmniFocusScript()`. The core task/project CRUD tools (add, edit, remove) were migrated from AppleScript to OmniJS in v0.3.0.
 
 ## Changelog
+
+### v0.3.1
+
+- **`reorder_task`** (41 total) — move tasks before/after siblings or to beginning/ending of container
 
 ### v0.3.0
 

@@ -38,11 +38,12 @@ import * as listSubtasksTool from './tools/definitions/listSubtasks.js';
 import * as duplicateTaskTool from './tools/definitions/duplicateTask.js';
 import * as batchMoveTasksTool from './tools/definitions/batchMoveTasks.js';
 import * as notificationTools from './tools/definitions/notificationTools.js';
+import * as reorderTaskTool from './tools/definitions/reorderTask.js';
 
 // Create an MCP server
 const server = new McpServer({
   name: "OmniFocus MCP Plus",
-  version: "0.3.0"
+  version: "0.3.1"
 });
 
 // Register tools
@@ -334,6 +335,13 @@ server.tool(
   "Remove a notification (reminder) from a task by index",
   notificationTools.removeNotificationSchema.shape,
   notificationTools.removeNotificationHandler
+);
+
+server.tool(
+  "reorder_task",
+  "Reorder a task within its container — move before/after a sibling, or to beginning/ending. Controls next action in sequential projects.",
+  reorderTaskTool.schema.shape,
+  reorderTaskTool.handler
 );
 
 // Start the MCP server
