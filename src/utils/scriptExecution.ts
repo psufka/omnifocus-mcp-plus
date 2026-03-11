@@ -77,6 +77,46 @@ export async function executeJXA(script: string): Promise<any[]> {
   }
 }
 
+/**
+ * Execute an inline OmniJS script inside OmniFocus via JXA.
+ * Args are injected as `const args = {...};` at the top of the script.
+ * Returns parsed JSON from the script's return value.
+ */
+export async function runOmniJs(omniJsScript: string, args?: Record<string, any>): Promise<any> {
+  const argsInjection = args ? `const args = ${JSON.stringify(args)};` : '';
+  const fullScript = argsInjection + omniJsScript;
+  const escapedScript = fullScript.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+
+  const jxaScript = `function run() {
+  try {
+    const app = Application('OmniFocus');
+    app.includeStandardAdditions = true;
+    const result = app.evaluateJavascript(\`(() => {
+      try { ${escapedScript} } catch(e) { return JSON.stringify({success:false,error:e.message}); }
+    })()\`);
+    return result;
+  } catch(e) {
+    return JSON.stringify({success:false,error:e.message});
+  }
+}`;
+
+  const tempFile = join(tmpdir(), `omnijs_${Date.now()}.js`);
+  try {
+    writeFileSync(tempFile, jxaScript);
+    const { stdout, stderr } = await execAsync(`osascript -l JavaScript "${tempFile}"`);
+    if (stderr) {
+      console.error("runOmniJs stderr:", stderr);
+    }
+    try {
+      return JSON.parse(stdout);
+    } catch {
+      return stdout.trim();
+    }
+  } finally {
+    try { unlinkSync(tempFile); } catch {}
+  }
+}
+
 // Function to execute scripts in OmniFocus using the URL scheme
 // Update src/utils/scriptExecution.ts
 export async function executeOmniFocusScript(scriptPath: string, args?: any): Promise<any> {

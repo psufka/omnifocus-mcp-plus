@@ -24,11 +24,21 @@ import * as filterTasksTool from './tools/definitions/filterTasks.js';
 // Import custom perspective tools
 import * as listCustomPerspectivesTool from './tools/definitions/listCustomPerspectives.js';
 import * as getCustomPerspectiveTasksTool from './tools/definitions/getCustomPerspectiveTasks.js';
+// Import new OmniJS-based tools
+import * as appendToNoteTool from './tools/definitions/appendToNote.js';
+import * as uncompleteTaskTool from './tools/definitions/uncompleteTask.js';
+import * as setTaskRepetitionTool from './tools/definitions/setTaskRepetition.js';
+import * as listProjectsTool from './tools/definitions/listProjects.js';
+import * as searchProjectsTool from './tools/definitions/searchProjects.js';
+import * as getProjectCountsTool from './tools/definitions/getProjectCounts.js';
+import * as getTaskCountsTool from './tools/definitions/getTaskCounts.js';
+import * as folderTools from './tools/definitions/folderTools.js';
+import * as tagTools from './tools/definitions/tagTools.js';
 
 // Create an MCP server
 const server = new McpServer({
-  name: "OmniFocus MCP",
-  version: "0.1.0"
+  name: "OmniFocus MCP Plus",
+  version: "0.2.0"
 });
 
 // Register tools
@@ -153,6 +163,129 @@ server.tool(
   "Get tasks from a specific OmniFocus custom perspective by name. Use this when user refers to perspective names like 'Today', 'Weekly Review', 'This Week' etc. - these are custom views created in OmniFocus, NOT tags. Supports hierarchical tree display of task relationships.",
   getCustomPerspectiveTasksTool.schema.shape,
   getCustomPerspectiveTasksTool.handler
+);
+
+// --- New OmniJS-based tools ---
+
+server.tool(
+  "append_to_note",
+  "Append text to a task or project's note without overwriting existing content",
+  appendToNoteTool.schema.shape,
+  appendToNoteTool.handler
+);
+
+server.tool(
+  "uncomplete_task",
+  "Mark a completed task as incomplete again",
+  uncompleteTaskTool.schema.shape,
+  uncompleteTaskTool.handler
+);
+
+server.tool(
+  "set_task_repetition",
+  "Set or clear a repeating schedule on a task using iCal RRULE syntax (e.g. FREQ=DAILY;INTERVAL=1)",
+  setTaskRepetitionTool.schema.shape,
+  setTaskRepetitionTool.handler
+);
+
+server.tool(
+  "list_projects",
+  "List and filter OmniFocus projects by folder, status, stalled state, with sorting and pagination",
+  listProjectsTool.schema.shape,
+  listProjectsTool.handler
+);
+
+server.tool(
+  "search_projects",
+  "Search OmniFocus projects by name query",
+  searchProjectsTool.schema.shape,
+  searchProjectsTool.handler
+);
+
+server.tool(
+  "get_project_counts",
+  "Get aggregate project counts by status (active, on hold, completed, dropped, stalled)",
+  getProjectCountsTool.schema.shape,
+  getProjectCountsTool.handler
+);
+
+server.tool(
+  "get_task_counts",
+  "Get aggregate task counts with optional filters (project, tag, flagged, date range). Returns total, available, completed, overdue, due soon, flagged, deferred.",
+  getTaskCountsTool.schema.shape,
+  getTaskCountsTool.handler
+);
+
+// Folder CRUD tools
+server.tool(
+  "list_folders",
+  "List all OmniFocus folders with project counts",
+  folderTools.listFoldersSchema.shape,
+  folderTools.listFoldersHandler
+);
+
+server.tool(
+  "get_folder",
+  "Get details of an OmniFocus folder including its projects and subfolders",
+  folderTools.getFolderSchema.shape,
+  folderTools.getFolderHandler
+);
+
+server.tool(
+  "create_folder",
+  "Create a new folder in OmniFocus, optionally nested under a parent folder",
+  folderTools.createFolderSchema.shape,
+  folderTools.createFolderHandler
+);
+
+server.tool(
+  "update_folder",
+  "Update an OmniFocus folder's name or status",
+  folderTools.updateFolderSchema.shape,
+  folderTools.updateFolderHandler
+);
+
+server.tool(
+  "delete_folder",
+  "Delete an OmniFocus folder. WARNING: this also deletes all projects inside the folder.",
+  folderTools.deleteFolderSchema.shape,
+  folderTools.deleteFolderHandler
+);
+
+// Tag CRUD tools
+server.tool(
+  "list_tags",
+  "List all OmniFocus tags with available task counts, filterable by status",
+  tagTools.listTagsSchema.shape,
+  tagTools.listTagsHandler
+);
+
+server.tool(
+  "search_tags",
+  "Search OmniFocus tags by name query",
+  tagTools.searchTagsSchema.shape,
+  tagTools.searchTagsHandler
+);
+
+server.tool(
+  "create_tag",
+  "Create a new tag in OmniFocus, optionally nested under a parent tag",
+  tagTools.createTagSchema.shape,
+  tagTools.createTagHandler
+);
+
+server.tool(
+  "update_tag",
+  "Update an OmniFocus tag's name or status",
+  tagTools.updateTagSchema.shape,
+  tagTools.updateTagHandler
+);
+
+server.tool(
+  "delete_tag",
+  "Delete an OmniFocus tag",
+  tagTools.deleteTagSchema.shape,
+  tagTools.deleteTagHandler
 );
 
 // Start the MCP server
