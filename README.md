@@ -1,24 +1,18 @@
-# OmniFocus MCP Enhanced (Fork)
+# OmniFocus MCP Plus
 
-v0.1.0 fork of [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced) with bug fixes for date handling, task completion, AppleScript escaping, and due-date filtering. All Chinese comments translated to English.
+A comprehensive MCP server for OmniFocus 4 with 34 tools covering task management, project/folder/tag CRUD, custom perspectives, and advanced filtering.
 
-See the [upstream README](https://github.com/jqlts1/omnifocus-mcp-enhanced/blob/main/README.md) for full tool reference and examples.
+Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
 ## Installation
 
 Requires macOS with OmniFocus 4 and Node.js 18+.
 
-### Quick Install
-
-```bash
-claude mcp add omnifocus -- npx -y omnifocus-mcp-enhanced-fork
-```
-
 ### From Source
 
 ```bash
-git clone https://github.com/psufka/omnifocus-mcp-enhanced-fork.git
-cd omnifocus-mcp-enhanced-fork
+git clone https://github.com/psufka/omnifocus-mcp-plus.git
+cd omnifocus-mcp-plus
 npm install && npm run build
 npm test  # all tests should pass
 claude mcp add omnifocus -- node "$(pwd)/dist/server.js"
@@ -26,41 +20,105 @@ claude mcp add omnifocus -- node "$(pwd)/dist/server.js"
 
 Restart Claude Code to pick up the new server.
 
-## Fork Changes
+## Tools (34)
 
-### Bug Fixes
+### Task Management
+| Tool | Description |
+|------|-------------|
+| `add_omnifocus_task` | Add a new task with dates, tags, project, parent task |
+| `edit_item` | Edit task/project: rename, dates, flags, status, tags, move |
+| `remove_item` | Remove a task or project (duplicate-name safe) |
+| `move_task` | Move task to project, parent task, or inbox |
+| `get_task_by_id` | Get task details by ID or name |
+| `uncomplete_task` | Mark a completed task as incomplete |
+| `set_task_repetition` | Set/clear repeating schedule (iCal RRULE syntax) |
+| `append_to_note` | Append text to a task or project note |
+| `batch_add_items` | Add multiple tasks/projects in one call |
+| `batch_remove_items` | Remove multiple items in one call |
 
-- **Fix task completion for inbox and repeating tasks** — Upstream uses `set completed of foundItem to true` in AppleScript, which fails on inbox tasks and tasks in repeating projects. Changed to `mark complete` / `mark incomplete` commands which work for all task types. (Relates to upstream [#14](https://github.com/jqlts1/omnifocus-mcp-enhanced/issues/14))
-- **Fix all due-date filters being silently ignored** — `dueToday`, `dueThisWeek`, `dueThisMonth`, `overdue`, `dueBefore`, and `dueAfter` were never wired up. The OmniJS script didn't extract them, and the TypeScript client-side filter layer didn't include them. All six filters now work via client-side filtering.
-- **Fix dateFormatter discarding time components** — `appleScriptDateCode()` was hardcoding hours/minutes/seconds to 0, so all due dates landed at midnight regardless of the time in the ISO string. Now parses and preserves the `T` time component.
-- **Fix multiline notes breaking AppleScript** — Notes containing newlines caused AppleScript syntax errors. Newlines are now converted to `" & return & "` concatenation. Handles `\r\n`, `\r`, and `\n` line endings.
-- **Fix JSON escaping in AppleScript return strings** — User input (task names, project names) embedded in JSON return strings is now double-escaped so quotes survive AppleScript interpretation into valid JSON.
-- **Fix single-quote escaping inserting unwanted backslashes** — The AppleScript sanitization regex incorrectly escaped `'` characters (apostrophes), producing `\'` in task names. Removed — AppleScript double-quoted strings don't require single-quote escaping.
-- **Fix `isDateInCurrentWeek` using Monday-start weeks** — Changed to Sunday-start (Sun-Sat) to match standard US week convention.
+### Task Queries
+| Tool | Description |
+|------|-------------|
+| `filter_tasks` | Advanced filtering: status, dates, projects, tags, search |
+| `get_inbox_tasks` | Get inbox tasks |
+| `get_flagged_tasks` | Get flagged tasks with optional project filter |
+| `get_forecast_tasks` | Get due/deferred tasks in date range |
+| `get_tasks_by_tag` | Get tasks by tag name |
+| `get_today_completed_tasks` | Get tasks completed today |
+| `get_task_counts` | Aggregate counts: total, available, completed, overdue, due soon, flagged |
+| `get_custom_perspective_tasks` | Get tasks from a custom perspective |
+| `list_custom_perspectives` | List all custom perspectives |
+| `dump_database` | Full database export |
 
-### Enhancements
+### Projects
+| Tool | Description |
+|------|-------------|
+| `add_project` | Create a new project |
+| `list_projects` | List/filter projects by folder, status, stalled state |
+| `search_projects` | Search projects by name |
+| `get_project_counts` | Aggregate counts by status |
 
-- **Display task IDs in all output tools** — All task-listing tools now include the task ID in brackets (e.g., `Task Name [abc123]`), enabling ID-based edits and completions.
-- **Duplicate-name protection on `removeItem`** — When removing by name, if multiple tasks share the same name, returns an "Ambiguous" error instead of silently deleting the first match. Matches `editItem` behavior.
-- **Require full ISO 8601 dates with timezone** — All date parameters now require format like `2026-03-05T09:00:00-06:00`. Bare `YYYY-MM-DD` dates resolve to UTC midnight and display as the wrong day in local timezone.
-- **Expand `edit_item` tool description** — Lists all capabilities (rename, dates, flags, status, tags, move, etc.) so the LLM knows what the tool can do without guessing.
-- **Move task to project/parent/inbox** — `edit_item` supports `newProjectName`, `newProjectId`, `newParentTaskName`, `newParentTaskId`, and `moveToInbox`. Includes cycle detection (prevents moving a task under itself or descendants). Also available as standalone `move_task` tool.
+### Folders
+| Tool | Description |
+|------|-------------|
+| `list_folders` | List all folders with project counts |
+| `get_folder` | Get folder details including projects and subfolders |
+| `create_folder` | Create a folder, optionally nested |
+| `update_folder` | Update folder name or status |
+| `delete_folder` | Delete a folder (and all projects inside it) |
 
-### Code Quality
+### Tags
+| Tool | Description |
+|------|-------------|
+| `list_tags` | List tags with task counts, filter by status |
+| `search_tags` | Search tags by name |
+| `create_tag` | Create a tag, optionally nested |
+| `update_tag` | Update tag name or status |
+| `delete_tag` | Delete a tag |
 
-- **All Chinese comments translated to English** — Comments, log messages, UI strings, and error messages across 22+ source files translated from Chinese to English.
-- **Test suite wired up** — `npm test` now runs 57 unit tests via `tsx`. Previously just echoed "passed".
-- **Regression tests for time preservation** — 3 new tests covering the dateFormatter fix (full ISO, non-zero minutes/seconds, date-only defaults to midnight).
-- **Temp file paths quoted in exec calls** — `osascript` invocations now quote the temp file path, preventing potential issues with spaces in paths.
-- **Version synced** — `server.ts` version now matches `package.json`.
-- **Repository URL updated** — Points to this fork.
+## Architecture
+
+The server uses two execution patterns:
+
+- **AppleScript** (original tools) — task creation, editing, removal via `osascript`
+- **OmniJS via JXA** (v0.2.0+ tools) — inline JavaScript executed inside OmniFocus via `runOmniJs()`. No AppleScript escaping issues, native access to `appendStringToNote()`, `markIncomplete()`, `Task.RepetitionRule`, folder/tag CRUD, etc.
+
+## Changelog
+
+### v0.2.0
+
+- **17 new tools** using OmniJS: append_to_note, uncomplete_task, set_task_repetition, list_projects, search_projects, get_project_counts, get_task_counts, folder CRUD (5 tools), tag CRUD (5 tools)
+- **New `runOmniJs()` helper** — simplified inline OmniJS execution with JSON arg injection, no external script files needed
+- **Renamed** from omnifocus-mcp-enhanced-fork to omnifocus-mcp-plus
+
+### v0.1.0
+
+Fork of jqlts1/omnifocus-mcp-enhanced with:
+- Fix task completion for inbox and repeating tasks
+- Fix all due-date filters being silently ignored
+- Fix dateFormatter discarding time components
+- Fix multiline notes breaking AppleScript
+- Fix JSON escaping in AppleScript return strings
+- Fix single-quote escaping inserting unwanted backslashes
+- Fix `isDateInCurrentWeek` using Monday-start weeks
+- Display task IDs in all output tools
+- Duplicate-name protection on `removeItem`
+- Require full ISO 8601 dates with timezone
+- Move task to project/parent/inbox support
+- All Chinese comments translated to English
+- Test suite wired up (8 unit tests via tsx)
 
 ## Known Limitations
 
-- **JSON injection in AppleScript return strings** — If a task name contains `"` or `\`, the JSON return from AppleScript may be malformed. The error path handles this gracefully (returns raw output as error message). Multi-layer escaping (TypeScript → AppleScript → JSON) makes a clean fix impractical.
-- **`appleScriptDateCode` ignores timezone offset** — Extracts the time component but not the timezone. Works correctly when the machine's local timezone matches the offset in the ISO string (e.g., Central time). Not portable to different timezones.
-- **Parameter injection in `executeOmniFocusScript` is fragile** — Uses regex `.replace()` chains to inject parameters into JXA scripts by matching hardcoded string patterns. If upstream scripts change variable declarations, injection silently fails.
+- **JSON injection in AppleScript return strings** — Task names containing `"` or `\` may produce malformed JSON from AppleScript-based tools. OmniJS-based tools (v0.2.0+) are not affected.
+- **`appleScriptDateCode` ignores timezone offset** — Works correctly when machine timezone matches the ISO string offset.
+- **Parameter injection in `executeOmniFocusScript` is fragile** — Uses regex replacement. OmniJS-based tools use direct JSON injection instead.
 
-## Original README
+## Credits
 
-The full upstream v1.6.8 README is preserved in [README-v1.6.8-original.md](README-v1.6.8-original.md).
+- [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced) — original MCP server with perspective support
+- [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP) — reference implementation for folder/tag CRUD, project listing, and OmniJS patterns
+
+## License
+
+MIT
