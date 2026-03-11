@@ -9,9 +9,9 @@ export interface AppendToNoteParams {
 export async function appendToNote(params: AppendToNoteParams): Promise<{ success: boolean; id?: string; name?: string; noteLength?: number; error?: string }> {
   const script = `
     const collection = args.object_type === 'project'
-      ? document.flattenedProjects
-      : document.flattenedTasks;
-    const obj = collection.find(o => o.id.primaryKey === args.object_id);
+      ? flattenedProjects
+      : flattenedTasks;
+    const obj = collection.filter(o => o.id.primaryKey === args.object_id)[0];
     if (!obj) return JSON.stringify({ success: false, error: args.object_type + ' not found with ID: ' + args.object_id });
     obj.appendStringToNote(args.text);
     return JSON.stringify({

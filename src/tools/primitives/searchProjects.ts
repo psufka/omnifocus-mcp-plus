@@ -16,7 +16,7 @@ export async function searchProjects(params: SearchProjectsParams): Promise<any>
     const query = args.query.toLowerCase();
     const limit = args.limit || 50;
 
-    let projects = Array.from(document.flattenedProjects).filter(p =>
+    let projects = flattenedProjects.filter(p =>
       p.name.toLowerCase().includes(query)
     );
 

@@ -3,12 +3,12 @@ import { runOmniJs } from '../../utils/scriptExecution.js';
 export async function listFolders(params: { limit?: number } = {}): Promise<any> {
   const script = `
     const limit = args.limit || 100;
-    const folders = Array.from(document.flattenedFolders).slice(0, limit);
+    const folders = flattenedFolders.filter(() => true).slice(0, limit);
     const result = folders.map(f => ({
       id: f.id.primaryKey,
       name: f.name,
-      parentName: f.parent && f.parent !== document ? f.parent.name : null,
-      projectCount: Array.from(f.projects).length
+      parentName: f.parent && f.parent.name && f.parent !== library ? f.parent.name : null,
+      projectCount: f.projects.filter(() => true).length
     }));
     return JSON.stringify({ success: true, folders: result, count: result.length });
   `;
@@ -17,11 +17,11 @@ export async function listFolders(params: { limit?: number } = {}): Promise<any>
 
 export async function getFolder(params: { name_or_id: string }): Promise<any> {
   const script = `
-    const folders = Array.from(document.flattenedFolders);
-    let folder = folders.find(f => f.id.primaryKey === args.name_or_id);
+    const allFolders = flattenedFolders.filter(() => true);
+    let folder = allFolders.filter(f => f.id.primaryKey === args.name_or_id)[0];
     if (!folder) {
       const lower = args.name_or_id.toLowerCase();
-      folder = folders.find(f => f.name.toLowerCase() === lower);
+      folder = allFolders.filter(f => f.name.toLowerCase() === lower)[0];
     }
     if (!folder) return JSON.stringify({ success: false, error: 'Folder not found: ' + args.name_or_id });
 
@@ -29,12 +29,12 @@ export async function getFolder(params: { name_or_id: string }): Promise<any> {
     statusNameMap[Folder.Status.Active] = 'active';
     statusNameMap[Folder.Status.Dropped] = 'dropped';
 
-    const projects = Array.from(folder.projects).map(p => ({
+    const projects = folder.projects.filter(() => true).map(p => ({
       id: p.id.primaryKey,
       name: p.name,
       status: p.status === Project.Status.Active ? 'active' : p.status === Project.Status.OnHold ? 'on_hold' : p.status === Project.Status.Done ? 'completed' : 'dropped'
     }));
-    const subfolders = Array.from(folder.folders).map(f => ({
+    const subfolders = folder.folders.filter(() => true).map(f => ({
       id: f.id.primaryKey,
       name: f.name
     }));
@@ -44,7 +44,7 @@ export async function getFolder(params: { name_or_id: string }): Promise<any> {
       id: folder.id.primaryKey,
       name: folder.name,
       status: statusNameMap[folder.status] || 'active',
-      parentName: folder.parent && folder.parent !== document ? folder.parent.name : null,
+      parentName: folder.parent && folder.parent.name && folder.parent !== library ? folder.parent.name : null,
       projects: projects,
       subfolders: subfolders
     });
@@ -54,13 +54,13 @@ export async function getFolder(params: { name_or_id: string }): Promise<any> {
 
 export async function createFolder(params: { name: string; parent?: string }): Promise<any> {
   const script = `
-    let location = document.ending;
+    let location = library.ending;
 
     if (args.parent) {
-      const folders = Array.from(document.flattenedFolders);
+      const allFolders = flattenedFolders.filter(() => true);
       const lower = args.parent.toLowerCase();
-      const parentFolder = folders.find(f => f.id.primaryKey === args.parent) ||
-                           folders.find(f => f.name.toLowerCase() === lower);
+      const parentFolder = allFolders.filter(f => f.id.primaryKey === args.parent)[0] ||
+                           allFolders.filter(f => f.name.toLowerCase() === lower)[0];
       if (!parentFolder) return JSON.stringify({ success: false, error: 'Parent folder not found: ' + args.parent });
       location = parentFolder.ending;
     }
@@ -77,11 +77,11 @@ export async function createFolder(params: { name: string; parent?: string }): P
 
 export async function updateFolder(params: { name_or_id: string; name?: string; status?: 'active' | 'dropped' }): Promise<any> {
   const script = `
-    const folders = Array.from(document.flattenedFolders);
-    let folder = folders.find(f => f.id.primaryKey === args.name_or_id);
+    const allFolders = flattenedFolders.filter(() => true);
+    let folder = allFolders.filter(f => f.id.primaryKey === args.name_or_id)[0];
     if (!folder) {
       const lower = args.name_or_id.toLowerCase();
-      folder = folders.find(f => f.name.toLowerCase() === lower);
+      folder = allFolders.filter(f => f.name.toLowerCase() === lower)[0];
     }
     if (!folder) return JSON.stringify({ success: false, error: 'Folder not found: ' + args.name_or_id });
 
@@ -106,11 +106,11 @@ export async function updateFolder(params: { name_or_id: string; name?: string; 
 
 export async function deleteFolder(params: { name_or_id: string }): Promise<any> {
   const script = `
-    const folders = Array.from(document.flattenedFolders);
-    let folder = folders.find(f => f.id.primaryKey === args.name_or_id);
+    const allFolders = flattenedFolders.filter(() => true);
+    let folder = allFolders.filter(f => f.id.primaryKey === args.name_or_id)[0];
     if (!folder) {
       const lower = args.name_or_id.toLowerCase();
-      folder = folders.find(f => f.name.toLowerCase() === lower);
+      folder = allFolders.filter(f => f.name.toLowerCase() === lower)[0];
     }
     if (!folder) return JSON.stringify({ success: false, error: 'Folder not found: ' + args.name_or_id });
 

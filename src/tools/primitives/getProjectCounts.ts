@@ -6,7 +6,7 @@ export interface GetProjectCountsParams {
 
 export async function getProjectCounts(params: GetProjectCountsParams = {}): Promise<any> {
   const script = `
-    let projects = Array.from(document.flattenedProjects);
+    let projects = flattenedProjects.filter(() => true);
 
     if (args.folder) {
       const folderName = args.folder.toLowerCase();

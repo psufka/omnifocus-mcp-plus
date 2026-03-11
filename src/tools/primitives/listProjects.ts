@@ -25,7 +25,7 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<any
     statusNameMap[Project.Status.Done] = 'completed';
     statusNameMap[Project.Status.Dropped] = 'dropped';
 
-    let projects = Array.from(document.flattenedProjects);
+    let projects = flattenedProjects.filter(() => true);
 
     // Filter by folder
     if (args.folder) {
@@ -90,7 +90,7 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<any
 
     // Map to output
     const result = projects.map(p => {
-      const allTasks = Array.from(p.flattenedTasks);
+      const allTasks = p.flattenedTasks.filter(() => true);
       const remaining = allTasks.filter(t => t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped).length;
       const isStalled = p.status === Project.Status.Active && remaining > 0 && p.nextTask === null;
       return {

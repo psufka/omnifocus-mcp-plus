@@ -10,7 +10,7 @@ export interface GetTaskCountsParams {
 
 export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<any> {
   const script = `
-    let tasks = Array.from(document.flattenedTasks);
+    let tasks = flattenedTasks.filter(() => true);
 
     // Filter by project
     if (args.project) {

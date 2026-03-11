@@ -8,7 +8,7 @@ export interface SetTaskRepetitionParams {
 
 export async function setTaskRepetition(params: SetTaskRepetitionParams): Promise<{ success: boolean; id?: string; name?: string; repetitionRule?: string | null; error?: string }> {
   const script = `
-    const task = document.flattenedTasks.find(t => t.id.primaryKey === args.task_id);
+    const task = flattenedTasks.filter(t => t.id.primaryKey === args.task_id)[0];
     if (!task) return JSON.stringify({ success: false, error: 'Task not found with ID: ' + args.task_id });
 
     if (args.schedule_type === 'none') {
