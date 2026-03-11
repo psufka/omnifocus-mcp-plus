@@ -1,4 +1,4 @@
-import { executeAppleScript } from '../../utils/scriptExecution.js';
+import { runOmniJs } from '../../utils/scriptExecution.js';
 
 // Interface for item removal parameters
 export interface RemoveItemParams {
@@ -8,144 +8,60 @@ export interface RemoveItemParams {
 }
 
 /**
- * Generate pure AppleScript for item removal
- */
-function generateAppleScript(params: RemoveItemParams): string {
-  // Sanitize and prepare parameters for AppleScript
-  const id = params.id?.replace(/["\\]/g, '\\$&') || '';
-  const name = params.name?.replace(/["\\]/g, '\\$&') || '';
-  const itemType = params.itemType;
-  const listName = itemType === 'task' ? 'flattened tasks' : 'flattened projects';
-  const singularTypeLabel = itemType === 'task' ? 'task' : 'project';
-  // JSON-safe version: additional escaping so " and \ survive AppleScript interpretation into valid JSON
-  const nameJson = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-
-  // Verify we have at least one identifier
-  if (!id && !name) {
-    return `return "{\\\"success\\\":false,\\\"error\\\":\\\"Either id or name must be provided\\\"}"`;
-  }
-
-  // Construct AppleScript with error handling
-  let script = `
-  try
-    tell application "OmniFocus"
-      tell front document
-        -- Find the item to remove
-        set foundItem to missing value
-`;
-
-  if (id) {
-    script += `
-        -- Try to find by ID first
-        try
-          set foundItem to first ${itemType === 'task' ? 'flattened task' : 'flattened project'} where id = "${id}"
-        end try
-`;
-  }
-
-  if (name) {
-    script += `
-        -- Resolve by name with duplicate protection
-        if foundItem is missing value then
-          set nameMatches to (${listName} where name = "${name}")
-          set nameMatchCount to count of nameMatches
-
-          if nameMatchCount = 1 then
-            set foundItem to item 1 of nameMatches
-          else if nameMatchCount > 1 then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Ambiguous ${singularTypeLabel} name: ${nameJson}. Multiple matches found; please use id.\\\"}"
-          end if
-        end if
-`;
-  }
-
-  // Add the rest of the script
-  script += `
-        -- If we found the item, remove it
-        if foundItem is not missing value then
-          set itemName to name of foundItem
-          set itemId to id of foundItem as string
-
-          -- JSON-escape itemName for safe embedding in return value
-          set prevDelims to AppleScript's text item delimiters
-          set AppleScript's text item delimiters to "\\\\"
-          set nameParts to text items of itemName
-          set AppleScript's text item delimiters to "\\\\\\\\"
-          set itemNameJson to nameParts as text
-          set AppleScript's text item delimiters to "\\""
-          set nameParts to text items of itemNameJson
-          set AppleScript's text item delimiters to "\\\\\\""
-          set itemNameJson to nameParts as text
-          set AppleScript's text item delimiters to prevDelims
-
-          -- Delete the item
-          delete foundItem
-
-          -- Return success
-          return "{\\\"success\\\":true,\\\"id\\\":\\"" & itemId & "\\",\\\"name\\\":\\"" & itemNameJson & "\\"}"
-        else
-          -- Item not found
-          return "{\\\"success\\\":false,\\\"error\\\":\\\"Item not found\\\"}"
-        end if
-      end tell
-    end tell
-  on error errorMessage
-    return "{\\\"success\\\":false,\\\"error\\\":\\"" & errorMessage & "\\"}"
-  end try
-  `;
-
-  return script;
-}
-
-/**
  * Remove a task or project from OmniFocus
  */
 export async function removeItem(params: RemoveItemParams): Promise<{ success: boolean, id?: string, name?: string, error?: string }> {
+  if (!params.id && !params.name) {
+    return { success: false, error: "Either id or name must be provided" };
+  }
+
+  const script = `
+    const collection = args.itemType === 'task' ? flattenedTasks : flattenedProjects;
+
+    let item;
+    if (args.id) {
+      item = collection.filter(o => o.id.primaryKey === args.id)[0];
+    }
+
+    if (!item && args.name) {
+      const matches = collection.filter(o => o.name === args.name);
+      if (matches.length > 1) {
+        return JSON.stringify({
+          success: false,
+          error: 'Ambiguous ' + args.itemType + ' name: ' + args.name + '. Multiple matches found; please use id.'
+        });
+      }
+      item = matches[0];
+    }
+
+    if (!item) {
+      return JSON.stringify({ success: false, error: 'Item not found' });
+    }
+
+    const itemId = item.id.primaryKey;
+    const itemName = item.name;
+
+    deleteObject(item);
+
+    return JSON.stringify({
+      success: true,
+      id: itemId,
+      name: itemName
+    });
+  `;
+
   try {
-    // Generate AppleScript
-    const script = generateAppleScript(params);
-
-    console.error("Executing AppleScript for removal...");
-    console.error(`Item type: ${params.itemType}, ID: ${params.id || 'not provided'}, Name: ${params.name || 'not provided'}`);
-
-    // Log a preview of the script for debugging (first few lines)
-    const scriptPreview = script.split('\n').slice(0, 10).join('\n') + '\n...';
-    console.error("AppleScript preview:\n", scriptPreview);
-
-    // Execute AppleScript using temp file (avoids shell escaping issues)
-    const stdout = await executeAppleScript(script);
-
-    console.error("AppleScript stdout:", stdout);
-
-    // Parse the result
-    try {
-      const result = JSON.parse(stdout);
-
-      // Return the result
-      return {
-        success: result.success,
-        id: result.id,
-        name: result.name,
-        error: result.error
-      };
-    } catch (parseError) {
-      console.error("Error parsing AppleScript result:", parseError);
-      return {
-        success: false,
-        error: `Failed to parse result: ${stdout}`
-      };
-    }
+    const result = await runOmniJs(script, params);
+    return {
+      success: result.success,
+      id: result.id,
+      name: result.name,
+      error: result.error
+    };
   } catch (error: any) {
-    console.error("Error in removeItem execution:", error);
-
-    // Include more detailed error information
-    if (error.message && error.message.includes('syntax error')) {
-      console.error("This appears to be an AppleScript syntax error. Review the script generation logic.");
-    }
-
     return {
       success: false,
       error: error?.message || "Unknown error in removeItem"
     };
   }
-} 
+}

@@ -2,6 +2,29 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.3.0] - 2026-03-11
+
+### Added
+- **6 new tools** (40 total):
+  - `list_subtasks` — list children (subtasks) of a task, optionally recursive for full hierarchy
+  - `duplicate_task` — duplicate a task with name, note, dates, flags, tags; optionally into a different project
+  - `batch_move_tasks` — move multiple tasks to a project, parent task, or inbox in one call
+  - `list_notifications` — list all notifications (reminders) on a task
+  - `add_notification` — add absolute or relative (before due date) notifications
+  - `remove_notification` — remove a notification by index
+- **`tagMatchMode` parameter** on `filter_tasks` — `"all"` requires ALL specified tags (AND mode), `"any"` (default) matches any tag (OR mode)
+- **Effective due/defer dates** in all query tools — `effectiveDueDate` and `effectiveDeferDate` show dates inherited from parent tasks/projects. Displayed as "(eff)" when they differ from direct dates.
+
+### Changed
+- **AppleScript → OmniJS migration** — `addOmniFocusTask`, `addProject`, `editItem`, and `removeItem` rewritten from AppleScript to OmniJS via `runOmniJs()`. Eliminates:
+  - JSON injection bugs from special characters in task/project names
+  - AppleScript parse errors from `()` and `/` in names
+  - Timezone offset issues with `appleScriptDateCode`
+  - ~500 lines of fragile AppleScript generation code
+- **Task move via OmniJS** — `moveTasks()` API used instead of AppleScript `move` command. Now actually works for task-to-project and task-to-parent moves.
+- **Tag operations via OmniJS** — `item.clearTags()`, `item.addTag()`, `item.removeTag()` replace AppleScript reverse-iteration workaround
+- **`editItem` task status** — uses `item.markComplete()`, `item.markIncomplete()`, `item.drop()` instead of AppleScript `mark complete`/`set dropped`
+
 ## [0.2.2] - 2026-03-11
 
 ### Fixed

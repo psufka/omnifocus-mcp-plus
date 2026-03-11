@@ -1,5 +1,4 @@
-import { executeAppleScript } from '../../utils/scriptExecution.js';
-import { appleScriptDateCode } from '../../utils/dateFormatter.js';
+import { runOmniJs } from '../../utils/scriptExecution.js';
 
 // Interface for task creation parameters
 export interface AddOmniFocusTaskParams {
@@ -16,123 +15,10 @@ export interface AddOmniFocusTaskParams {
   parentTaskName?: string; // Parent task name for subtask creation (alternative to ID)
 }
 
-export function buildTagAssignmentScript(tags: string[], targetVar: string): string {
-  if (!tags || tags.length === 0) {
-    return '';
-  }
-
-  return tags.map(tag => {
-    const sanitizedTag = tag.replace(/["\\]/g, '\\$&');
-    return `
-          try
-            set theTag to missing value
-            try
-              set theTag to first flattened tag where name = "${sanitizedTag}"
-            end try
-            if theTag is missing value then
-              set theTag to make new tag with properties {name:"${sanitizedTag}"}
-            end if
-            add theTag to tags of ${targetVar}
-          on error
-            -- Ignore errors finding/adding tags
-          end try`;
-  }).join('\n');
-}
-
-/**
- * Generate pure AppleScript for task creation
- */
-export function generateAppleScript(params: AddOmniFocusTaskParams): string {
-  // Sanitize and prepare parameters for AppleScript
-  const name = params.name.replace(/["\\]/g, '\\$&'); // Escape quotes and backslashes
-  const note = params.note
-    ? params.note.replace(/["\\]/g, '\\$&').replace(/\r\n|\r|\n/g, '" & return & "')
-    : '';
-  // Build date variables outside OmniFocus tell block to avoid locale parsing issues.
-  const dueDateCode = params.dueDate ? appleScriptDateCode(params.dueDate, 'dueDateValue') : '';
-  const deferDateCode = params.deferDate ? appleScriptDateCode(params.deferDate, 'deferDateValue') : '';
-  const plannedDateCode = params.plannedDate ? appleScriptDateCode(params.plannedDate, 'plannedDateValue') : '';
-  const datePreamble = [dueDateCode, deferDateCode, plannedDateCode].filter(Boolean).join('\n');
-  const flagged = params.flagged === true;
-  const estimatedMinutes = params.estimatedMinutes?.toString() || '';
-  const tags = params.tags || [];
-  const projectName = params.projectName?.replace(/["\\]/g, '\\$&') || '';
-  const parentTaskId = params.parentTaskId?.replace(/["\\]/g, '\\$&') || '';
-  const parentTaskName = params.parentTaskName?.replace(/["\\]/g, '\\$&') || '';
-  // JSON-safe versions: additional escaping so " and \ survive AppleScript interpretation into valid JSON
-  const nameJson = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const projectNameJson = projectName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const parentTaskIdJson = parentTaskId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const parentTaskNameJson = parentTaskName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const tagAssignmentScript = buildTagAssignmentScript(tags, 'newTask');
-
-  // Construct AppleScript with error handling
-  let script = `
-  try
-${datePreamble}
-    tell application "OmniFocus"
-      tell front document
-        -- Determine the container (parent task, project, or inbox)
-        if "${parentTaskId}" is not "" then
-          -- Create subtask using parent task ID
-          try
-            set theParentTask to first flattened task where id = "${parentTaskId}"
-            set newTask to make new task with properties {name:"${name}"} at end of tasks of theParentTask
-          on error
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Parent task not found with ID: ${parentTaskIdJson}\\\"}"
-          end try
-        else if "${parentTaskName}" is not "" then
-          -- Create subtask using parent task name
-          try
-            set theParentTask to first flattened task where name = "${parentTaskName}"
-            set newTask to make new task with properties {name:"${name}"} at end of tasks of theParentTask
-          on error
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Parent task not found with name: ${parentTaskNameJson}\\\"}"
-          end try
-        else if "${projectName}" is not "" then
-          -- Use specified project
-          try
-            set theProject to first flattened project where name = "${projectName}"
-            set newTask to make new task with properties {name:"${name}"} at end of tasks of theProject
-          on error
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Project not found: ${projectNameJson}\\\"}"
-          end try
-        else
-          -- Use inbox of the document
-          set newTask to make new inbox task with properties {name:"${name}"}
-        end if
-        
-        -- Set task properties
-        ${note ? `set note of newTask to "${note}"` : ''}
-        ${params.dueDate ? `set due date of newTask to dueDateValue` : ''}
-        ${params.deferDate ? `set defer date of newTask to deferDateValue` : ''}
-        ${params.plannedDate ? `set planned date of newTask to plannedDateValue` : ''}
-        ${flagged ? `set flagged of newTask to true` : ''}
-        ${estimatedMinutes ? `set estimated minutes of newTask to ${estimatedMinutes}` : ''}
-        
-        -- Get the task ID
-        set taskId to id of newTask as string
-        
-        -- Add tags if provided
-        ${tagAssignmentScript}
-        
-        -- Return success with task ID
-        return "{\\\"success\\\":true,\\\"taskId\\\":\\"" & taskId & "\\",\\\"name\\\":\\"${nameJson}\\"}"
-      end tell
-    end tell
-  on error errorMessage
-    return "{\\\"success\\\":false,\\\"error\\\":\\"" & errorMessage & "\\"}"
-  end try
-  `;
-
-  return script;
-}
-
 /**
  * Validate parent task parameters to prevent conflicts
  */
 async function validateParentTaskParams(params: AddOmniFocusTaskParams): Promise<{ valid: boolean, error?: string }> {
-  // Check if both parentTaskId and parentTaskName are provided
   if (params.parentTaskId && params.parentTaskName) {
     return {
       valid: false,
@@ -140,7 +26,6 @@ async function validateParentTaskParams(params: AddOmniFocusTaskParams): Promise
     };
   }
 
-  // Check if parent task is specified along with projectName
   if ((params.parentTaskId || params.parentTaskName) && params.projectName) {
     return {
       valid: false,
@@ -159,46 +44,78 @@ export async function addOmniFocusTask(params: AddOmniFocusTaskParams): Promise<
     // Validate parent task parameters
     const validation = await validateParentTaskParams(params);
     if (!validation.valid) {
-      return {
-        success: false,
-        error: validation.error
-      };
+      return { success: false, error: validation.error };
     }
 
-    // Generate AppleScript
-    const script = generateAppleScript(params);
+    const script = `
+      // Determine location
+      let location;
+      if (args.parentTaskId) {
+        const parent = flattenedTasks.filter(t => t.id.primaryKey === args.parentTaskId)[0];
+        if (!parent) {
+          return JSON.stringify({ success: false, error: 'Parent task not found with ID: ' + args.parentTaskId });
+        }
+        location = parent.ending;
+      } else if (args.parentTaskName) {
+        const matches = flattenedTasks.filter(t => t.name === args.parentTaskName);
+        if (matches.length === 0) {
+          return JSON.stringify({ success: false, error: 'Parent task not found with name: ' + args.parentTaskName });
+        }
+        if (matches.length > 1) {
+          return JSON.stringify({ success: false, error: 'Ambiguous parent task name: ' + args.parentTaskName + '. Multiple matches found; please use parentTaskId.' });
+        }
+        location = matches[0].ending;
+      } else if (args.projectName) {
+        const matches = flattenedProjects.filter(p => p.name === args.projectName);
+        if (matches.length === 0) {
+          return JSON.stringify({ success: false, error: 'Project not found: ' + args.projectName });
+        }
+        if (matches.length > 1) {
+          return JSON.stringify({ success: false, error: 'Ambiguous project name: ' + args.projectName + '. Multiple matches found.' });
+        }
+        location = matches[0].ending;
+      } else {
+        location = inbox.ending;
+      }
 
-    console.error("Generated AppleScript:");
-    console.error(script);
-    console.error("Executing AppleScript...");
+      const task = new Task(args.name, location);
 
-    // Execute AppleScript using temp file (avoids shell escaping issues)
-    const stdout = await executeAppleScript(script);
+      // Set properties
+      if (args.note) task.note = args.note;
+      if (args.dueDate) task.dueDate = new Date(args.dueDate);
+      if (args.deferDate) task.deferDate = new Date(args.deferDate);
+      try { if (args.plannedDate) task.plannedDate = new Date(args.plannedDate); } catch(e) {}
+      if (args.flagged) task.flagged = true;
+      if (args.estimatedMinutes) task.estimatedMinutes = args.estimatedMinutes;
 
-    console.error("AppleScript stdout:", stdout);
+      // Add tags
+      if (args.tags && args.tags.length > 0) {
+        for (const tagName of args.tags) {
+          let tag = flattenedTags.filter(t => t.name === tagName)[0];
+          if (!tag) {
+            tag = new Tag(tagName);
+          }
+          task.addTag(tag);
+        }
+      }
 
-    // Parse the result
-    try {
-      const result = JSON.parse(stdout);
+      return JSON.stringify({
+        success: true,
+        taskId: task.id.primaryKey,
+        name: task.name
+      });
+    `;
 
-      // Return the result
-      return {
-        success: result.success,
-        taskId: result.taskId,
-        error: result.error
-      };
-    } catch (parseError) {
-      console.error("Error parsing AppleScript result:", parseError);
-      return {
-        success: false,
-        error: `Failed to parse result: ${stdout}`
-      };
-    }
+    const result = await runOmniJs(script, params);
+    return {
+      success: result.success,
+      taskId: result.taskId,
+      error: result.error
+    };
   } catch (error: any) {
-    console.error("Error in addOmniFocusTask:", error);
     return {
       success: false,
       error: error?.message || "Unknown error in addOmniFocusTask"
     };
   }
-} 
+}

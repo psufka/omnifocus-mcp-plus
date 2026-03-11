@@ -15,6 +15,7 @@ export interface FilterTasksOptions {
   projectFilter?: string;
   tagFilter?: string | string[];
   exactTagMatch?: boolean;
+  tagMatchMode?: 'any' | 'all';
 
   // Due date filter
   dueBefore?: string;
@@ -107,18 +108,20 @@ function normalizeTaskTagNames(task: any): string[] {
     .map((name: string) => name.toLowerCase());
 }
 
-function matchesTagFilter(task: any, tagFilters: string[], exactTagMatch: boolean): boolean {
+function matchesTagFilter(task: any, tagFilters: string[], exactTagMatch: boolean, matchMode: 'any' | 'all' = 'any'): boolean {
   const taskTagNames = normalizeTaskTagNames(task);
   if (taskTagNames.length === 0) return false;
 
-  return tagFilters.some(filterTag => {
+  const matchFn = (filterTag: string) => {
     return taskTagNames.some(taskTagName => {
       if (exactTagMatch) {
         return taskTagName === filterTag;
       }
       return taskTagName.includes(filterTag);
     });
-  });
+  };
+
+  return matchMode === 'all' ? tagFilters.every(matchFn) : tagFilters.some(matchFn);
 }
 
 function shouldApplyClientSideFilters(options: FilterTasksOptions): boolean {
@@ -242,6 +245,7 @@ export function applyClientSideFilters(tasks: any[], options: FilterTasksOptions
 
   if (options.tagFilter) {
     const exactTagMatch = options.exactTagMatch ?? false;
+    const matchMode = options.tagMatchMode ?? 'any';
     const rawFilters = Array.isArray(options.tagFilter) ? options.tagFilter : [options.tagFilter];
     const normalizedFilters = rawFilters
       .map(tag => tag.trim().toLowerCase())
@@ -249,7 +253,7 @@ export function applyClientSideFilters(tasks: any[], options: FilterTasksOptions
 
     if (normalizedFilters.length > 0) {
       filteredTasks = filteredTasks.filter(task =>
-        matchesTagFilter(task, normalizedFilters, exactTagMatch)
+        matchesTagFilter(task, normalizedFilters, exactTagMatch, matchMode)
       );
     }
   }
@@ -461,7 +465,8 @@ function buildFilterSummary(options: FilterTasksOptions): string {
 
   if (options.tagFilter) {
     const tags = Array.isArray(options.tagFilter) ? options.tagFilter.join(', ') : options.tagFilter;
-    conditions.push(`Tags: ${tags}`);
+    const tagLabel = options.tagMatchMode === 'all' ? 'Tags (AND)' : 'Tags';
+    conditions.push(`${tagLabel}: ${tags}`);
   }
 
   if (options.flagged !== undefined) {
@@ -528,11 +533,18 @@ function formatTask(task: any): string {
     const dueDateStr = new Date(task.dueDate).toLocaleDateString();
     const isOverdue = new Date(task.dueDate) < new Date();
     dateInfo.push(isOverdue ? `⚠️ DUE: ${dueDateStr}` : `📅 DUE: ${dueDateStr}`);
+  } else if (task.effectiveDueDate) {
+    const effDueDateStr = new Date(task.effectiveDueDate).toLocaleDateString();
+    const isOverdue = new Date(task.effectiveDueDate) < new Date();
+    dateInfo.push(isOverdue ? `⚠️ DUE (eff): ${effDueDateStr}` : `📅 DUE (eff): ${effDueDateStr}`);
   }
 
   if (task.deferDate) {
     const deferDateStr = new Date(task.deferDate).toLocaleDateString();
     dateInfo.push(`🚀 DEFER: ${deferDateStr}`);
+  } else if (task.effectiveDeferDate) {
+    const effDeferDateStr = new Date(task.effectiveDeferDate).toLocaleDateString();
+    dateInfo.push(`🚀 DEFER (eff): ${effDeferDateStr}`);
   }
 
   if (task.plannedDate) {

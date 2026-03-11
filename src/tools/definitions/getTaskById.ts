@@ -47,10 +47,18 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
         const d = new Date(task.dueDate);
         infoText += `• **Due**: ${isNaN(d.getTime()) ? task.dueDate : d.toLocaleString()}\n`;
       }
+      if (task.effectiveDueDate && task.effectiveDueDate !== task.dueDate) {
+        const d = new Date(task.effectiveDueDate);
+        infoText += `• **Effective Due**: ${isNaN(d.getTime()) ? task.effectiveDueDate : d.toLocaleString()} (inherited)\n`;
+      }
 
       if (task.deferDate) {
         const d = new Date(task.deferDate);
         infoText += `• **Defer**: ${isNaN(d.getTime()) ? task.deferDate : d.toLocaleString()}\n`;
+      }
+      if (task.effectiveDeferDate && task.effectiveDeferDate !== task.deferDate) {
+        const d = new Date(task.effectiveDeferDate);
+        infoText += `• **Effective Defer**: ${isNaN(d.getTime()) ? task.effectiveDeferDate : d.toLocaleString()} (inherited)\n`;
       }
 
       if (task.plannedDate) {

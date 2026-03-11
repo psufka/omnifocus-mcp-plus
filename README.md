@@ -1,6 +1,6 @@
 # OmniFocus MCP Plus
 
-A comprehensive MCP server for OmniFocus 4 with 34 tools covering task management, project/folder/tag CRUD, custom perspectives, and advanced filtering.
+A comprehensive MCP server for OmniFocus 4 with 40 tools covering task management, project/folder/tag CRUD, custom perspectives, notifications, and advanced filtering.
 
 Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
@@ -20,7 +20,7 @@ claude mcp add omnifocus -- node "$(pwd)/dist/server.js"
 
 Restart Claude Code to pick up the new server.
 
-## Tools (34)
+## Tools (40)
 
 ### Task Management
 | Tool | Description |
@@ -29,17 +29,20 @@ Restart Claude Code to pick up the new server.
 | `edit_item` | Edit task/project: rename, dates, flags, status, tags, move |
 | `remove_item` | Remove a task or project (duplicate-name safe) |
 | `move_task` | Move task to project, parent task, or inbox |
+| `duplicate_task` | Duplicate a task with note, dates, flags, tags; optionally into a different project |
 | `get_task_by_id` | Get task details by ID or name |
+| `list_subtasks` | List children (subtasks), optionally recursive for full hierarchy |
 | `uncomplete_task` | Mark a completed task as incomplete |
 | `set_task_repetition` | Set/clear repeating schedule (iCal RRULE syntax) |
 | `append_to_note` | Append text to a task or project note |
 | `batch_add_items` | Add multiple tasks/projects in one call |
 | `batch_remove_items` | Remove multiple items in one call |
+| `batch_move_tasks` | Move multiple tasks to a destination in one call |
 
 ### Task Queries
 | Tool | Description |
 |------|-------------|
-| `filter_tasks` | Advanced filtering: status, dates, projects, tags, search |
+| `filter_tasks` | Advanced filtering: status, dates, projects, tags (AND/OR), search |
 | `get_inbox_tasks` | Get inbox tasks |
 | `get_flagged_tasks` | Get flagged tasks with optional project filter |
 | `get_forecast_tasks` | Get due/deferred tasks in date range |
@@ -49,6 +52,13 @@ Restart Claude Code to pick up the new server.
 | `get_custom_perspective_tasks` | Get tasks from a custom perspective |
 | `list_custom_perspectives` | List all custom perspectives |
 | `dump_database` | Full database export |
+
+### Notifications
+| Tool | Description |
+|------|-------------|
+| `list_notifications` | List all notifications (reminders) on a task |
+| `add_notification` | Add absolute or relative notification to a task |
+| `remove_notification` | Remove a notification by index |
 
 ### Projects
 | Tool | Description |
@@ -195,12 +205,16 @@ The `set_task_repetition` tool uses [iCal RRULE](https://icalendar.org/iCalendar
 
 ## Architecture
 
-The server uses two execution patterns:
-
-- **AppleScript** (original tools) — task creation, editing, removal via `osascript`
-- **OmniJS via JXA** (v0.2.0+ tools) — inline JavaScript executed inside OmniFocus via `runOmniJs()`. No AppleScript escaping issues, native access to `appendStringToNote()`, `markIncomplete()`, `Task.RepetitionRule`, folder/tag CRUD, etc.
+All tools use **OmniJS via JXA** — inline JavaScript executed inside OmniFocus via `runOmniJs()`. No AppleScript escaping issues, native access to all OmniJS APIs. Query tools use external `.js` scripts in `src/utils/omnifocusScripts/` loaded via `executeOmniFocusScript()`. The core task/project CRUD tools (add, edit, remove) were migrated from AppleScript to OmniJS in v0.3.0.
 
 ## Changelog
+
+### v0.3.0
+
+- **6 new tools** (40 total): `list_subtasks`, `duplicate_task`, `batch_move_tasks`, `list_notifications`, `add_notification`, `remove_notification`
+- **Tag AND filter** — `tagMatchMode: "all"` on `filter_tasks` requires all specified tags
+- **Effective dates** — `effectiveDueDate`/`effectiveDeferDate` in all query results (inherited from parent)
+- **AppleScript → OmniJS migration** — `addOmniFocusTask`, `addProject`, `editItem`, `removeItem` rewritten. Fixes special character crashes, timezone issues, and enables task move
 
 ### v0.2.2
 
@@ -237,15 +251,12 @@ Fork of jqlts1/omnifocus-mcp-enhanced with:
 
 ## Known Limitations
 
-- **`appleScriptDateCode` ignores timezone offset** — Works correctly when machine timezone matches the ISO string offset.
-- **Parameter injection in `executeOmniFocusScript` is fragile** — Uses regex replacement. OmniJS-based tools use direct JSON injection instead.
+- **Parameter injection in `executeOmniFocusScript` is fragile** — Uses regex replacement for query scripts. CRUD tools use direct JSON injection via `runOmniJs()` instead.
+- **Notification API** — Relative notification offset retrieval may not work on all OmniFocus versions. Absolute notifications are fully supported.
 
 ## Contributing
 
-PRs welcome! The codebase has two patterns for adding tools:
-
-1. **OmniJS tools** (preferred for new tools) — write inline JavaScript that runs inside OmniFocus via `runOmniJs()`. No escaping issues, full access to the OmniJS API. See `src/tools/primitives/folderTools.ts` for examples.
-2. **AppleScript tools** (legacy) — used by the original tools. More fragile due to escaping but still works.
+PRs welcome! All tools use **OmniJS** — write inline JavaScript that runs inside OmniFocus via `runOmniJs()`. No escaping issues, full access to the OmniJS API. See `src/tools/primitives/folderTools.ts` for examples.
 
 To add a new tool:
 1. Create a primitive in `src/tools/primitives/yourTool.ts`

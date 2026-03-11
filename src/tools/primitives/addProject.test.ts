@@ -1,51 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { generateAppleScript } from './addProject.js';
+import { AddProjectParams } from './addProject.js';
 
-test('addProject JSON-escapes quotes in error return strings', () => {
-  const script = generateAppleScript({
+test('AddProjectParams interface accepts all expected fields', () => {
+  // Type-level test: ensure the interface shape is correct
+  const params: AddProjectParams = {
     name: 'Test Project',
-    folderName: 'My "Quoted" Folder'
-  });
+    note: 'A note',
+    dueDate: '2026-03-15T17:00:00-05:00',
+    deferDate: '2026-03-10T09:00:00-05:00',
+    plannedDate: '2026-03-12T09:00:00-05:00',
+    flagged: true,
+    estimatedMinutes: 60,
+    tags: ['Work', 'Urgent'],
+    folderName: 'My Folder',
+    sequential: true
+  };
 
-  assert.match(script, /Folder not found: My \\\\\\"Quoted\\\\\\" Folder/);
-});
-
-test('addProject JSON-escapes quotes in success return string', () => {
-  const script = generateAppleScript({
-    name: 'My "Quoted" Project'
-  });
-
-  assert.match(script, /name.*My \\\\\\"Quoted\\\\\\" Project/);
-});
-
-test('addProject handles carriage returns in notes', () => {
-  const script = generateAppleScript({
-    name: 'CR Test',
-    note: 'line1\r\nline2\rline3\nline4'
-  });
-
-  assert.doesNotMatch(script, /line1\\r/);
-  assert.match(script, /line1" & return & "line2" & return & "line3" & return & "line4/);
-});
-
-test('addProject date handling uses preamble variables outside OmniFocus tell block', () => {
-  const script = generateAppleScript({
-    name: 'Project with dates',
-    dueDate: '2026-02-27',
-    deferDate: '2026-02-25',
-    plannedDate: '2026-02-24'
-  });
-
-  const tellIndex = script.indexOf('tell application "OmniFocus"');
-  const preambleIndex = script.indexOf('set dueDateValue to current date');
-  assert.ok(preambleIndex > -1 && preambleIndex < tellIndex);
-
-  assert.match(script, /set due date of newProject to dueDateValue/);
-  assert.match(script, /set defer date of newProject to deferDateValue/);
-  assert.match(script, /set planned date of newProject to plannedDateValue/);
-
-  assert.doesNotMatch(script, /set due date of newProject to date "/);
-  assert.doesNotMatch(script, /set defer date of newProject to date "/);
-  assert.doesNotMatch(script, /set planned date of newProject to date "/);
+  assert.equal(params.name, 'Test Project');
+  assert.equal(params.sequential, true);
+  assert.equal(params.tags?.length, 2);
 });

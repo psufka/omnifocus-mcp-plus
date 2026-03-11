@@ -61,6 +61,8 @@
           dueDate: formatDate(task.dueDate),
           deferDate: formatDate(task.deferDate),
           plannedDate: formatDate(task.plannedDate),
+          effectiveDueDate: formatDate(task.effectiveDueDate),
+          effectiveDeferDate: formatDate(task.effectiveDeferDate),
           estimatedMinutes: task.estimatedMinutes,
           tags: task.tags.map(tag => ({
             id: tag.id.primaryKey,

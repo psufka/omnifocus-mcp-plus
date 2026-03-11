@@ -217,6 +217,8 @@
           deferDate: formatDate(task.deferDate),
           plannedDate: formatDate(task.plannedDate),
           completedDate: formatDate(task.completionDate),
+          effectiveDueDate: formatDate(task.effectiveDueDate),
+          effectiveDeferDate: formatDate(task.effectiveDeferDate),
           estimatedMinutes: task.estimatedMinutes,
           projectId: task.containingProject ? task.containingProject.id.primaryKey : null,
           projectName: task.containingProject ? task.containingProject.name : null,

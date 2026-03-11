@@ -1,5 +1,4 @@
-import { executeAppleScript } from '../../utils/scriptExecution.js';
-import { appleScriptDateCode } from '../../utils/dateFormatter.js';
+import { runOmniJs } from '../../utils/scriptExecution.js';
 
 // Status options for tasks and projects
 type TaskStatus = 'incomplete' | 'completed' | 'dropped';
@@ -100,447 +99,6 @@ export function validateEditItemParams(params: EditItemParams): { valid: boolean
 }
 
 /**
- * Generate pure AppleScript for item editing
- */
-export function generateAppleScript(params: EditItemParams): string {
-  // Sanitize and prepare parameters for AppleScript
-  const id = params.id?.replace(/["\\]/g, '\\$&') || '';
-  const name = params.name?.replace(/["\\]/g, '\\$&') || '';
-  const itemType = params.itemType;
-  const listName = itemType === 'task' ? 'flattened tasks' : 'flattened projects';
-  const singularTypeLabel = itemType === 'task' ? 'task' : 'project';
-
-  const newProjectId = params.newProjectId?.replace(/["\\]/g, '\\$&') || '';
-  const newProjectName = params.newProjectName?.replace(/["\\]/g, '\\$&') || '';
-  const newParentTaskId = params.newParentTaskId?.replace(/["\\]/g, '\\$&') || '';
-  const newParentTaskName = params.newParentTaskName?.replace(/["\\]/g, '\\$&') || '';
-  // JSON-safe versions: additional escaping so " and \ survive AppleScript interpretation into valid JSON
-  const jsonEsc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const nameJson = jsonEsc(name);
-  const newProjectIdJson = jsonEsc(newProjectId);
-  const newProjectNameJson = jsonEsc(newProjectName);
-  const newParentTaskIdJson = jsonEsc(newParentTaskId);
-  const newParentTaskNameJson = jsonEsc(newParentTaskName);
-
-  const datePreambleParts: string[] = [];
-
-  if (params.newDueDate !== undefined && params.newDueDate !== '') {
-    datePreambleParts.push(appleScriptDateCode(params.newDueDate, 'newDueDateValue'));
-  }
-  if (params.newDeferDate !== undefined && params.newDeferDate !== '') {
-    datePreambleParts.push(appleScriptDateCode(params.newDeferDate, 'newDeferDateValue'));
-  }
-  if (params.newPlannedDate !== undefined && params.newPlannedDate !== '') {
-    datePreambleParts.push(appleScriptDateCode(params.newPlannedDate, 'newPlannedDateValue'));
-  }
-  const datePreamble = datePreambleParts.join('\n');
-
-  // Verify we have at least one identifier
-  if (!id && !name) {
-    return `return "{\\\"success\\\":false,\\\"error\\\":\\\"Either id or name must be provided\\\"}"`;
-  }
-
-  // Construct AppleScript with error handling
-  let script = `
-  try
-${datePreamble}
-    tell application "OmniFocus"
-      tell front document
-        -- Find the item to edit
-        set foundItem to missing value
-`;
-
-  if (id) {
-    script += `
-        -- Try to find by ID first
-        try
-          set foundItem to first ${itemType === 'task' ? 'flattened task' : 'flattened project'} where id = "${id}"
-        end try
-`;
-  }
-
-  if (name) {
-    script += `
-        -- Resolve by name with duplicate protection
-        if foundItem is missing value then
-          set nameMatches to (${listName} where name = "${name}")
-          set nameMatchCount to count of nameMatches
-
-          if nameMatchCount = 1 then
-            set foundItem to item 1 of nameMatches
-          else if nameMatchCount > 1 then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Ambiguous ${singularTypeLabel} name: ${nameJson}. Multiple matches found; please use id.\\\"}"
-          end if
-        end if
-`;
-  }
-
-  // Add the item editing logic
-  script += `
-        -- If we found the item, edit it
-        if foundItem is not missing value then
-          set itemName to name of foundItem
-          set itemId to id of foundItem as string
-          set changedProperties to {}
-`;
-
-  if (itemType === 'task' && hasTaskMoveTarget(params)) {
-    if (params.moveToInbox === true) {
-      script += `
-          -- Move task to inbox first (before property edits)
-          move foundItem to end of inbox tasks
-          set end of changedProperties to "moved (inbox)"
-`;
-    } else if (params.newProjectId || params.newProjectName) {
-      if (params.newProjectId) {
-        script += `
-          -- Resolve destination project by ID
-          set destinationProject to missing value
-          try
-            set destinationProject to first flattened project where id = "${newProjectId}"
-          end try
-
-          if destinationProject is missing value then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Destination project not found with ID: ${newProjectIdJson}\\\"}"
-          end if
-
-          -- Move task to destination project first (before property edits)
-          move foundItem to end of tasks of destinationProject
-          set end of changedProperties to "moved (project)"
-`;
-      } else {
-        script += `
-          -- Resolve destination project by name with duplicate protection
-          set destinationProjects to (flattened projects where name = "${newProjectName}")
-          set destinationProjectCount to count of destinationProjects
-
-          if destinationProjectCount = 0 then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Destination project not found with name: ${newProjectNameJson}\\\"}"
-          else if destinationProjectCount > 1 then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Ambiguous destination project name: ${newProjectNameJson}. Multiple matches found; please use project id.\\\"}"
-          end if
-
-          set destinationProject to item 1 of destinationProjects
-
-          -- Move task to destination project first (before property edits)
-          move foundItem to end of tasks of destinationProject
-          set end of changedProperties to "moved (project)"
-`;
-      }
-    } else if (params.newParentTaskId || params.newParentTaskName) {
-      if (params.newParentTaskId) {
-        script += `
-          -- Resolve destination parent task by ID
-          set destinationParentTask to missing value
-          try
-            set destinationParentTask to first flattened task where id = "${newParentTaskId}"
-          end try
-
-          if destinationParentTask is missing value then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Destination parent task not found with ID: ${newParentTaskIdJson}\\\"}"
-          end if
-`;
-      } else {
-        script += `
-          -- Resolve destination parent task by name with duplicate protection
-          set destinationParentTasks to (flattened tasks where name = "${newParentTaskName}")
-          set destinationParentTaskCount to count of destinationParentTasks
-
-          if destinationParentTaskCount = 0 then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Destination parent task not found with name: ${newParentTaskNameJson}\\\"}"
-          else if destinationParentTaskCount > 1 then
-            return "{\\\"success\\\":false,\\\"error\\\":\\\"Ambiguous destination parent task name: ${newParentTaskNameJson}. Multiple matches found; please use parent task id.\\\"}"
-          end if
-
-          set destinationParentTask to item 1 of destinationParentTasks
-`;
-      }
-
-      script += `
-          -- Prevent cycles: destination parent cannot be this task or any descendant of this task
-          set cursorTask to destinationParentTask
-          repeat while cursorTask is not missing value
-            if (id of cursorTask as string) is itemId then
-              return "{\\\"success\\\":false,\\\"error\\\":\\\"Invalid move target: cannot move a task into itself or its descendants.\\\"}"
-            end if
-
-            set nextCursorTask to missing value
-            try
-              set cursorContainer to container of cursorTask
-              if class of cursorContainer is task then
-                set nextCursorTask to cursorContainer
-              end if
-            end try
-            set cursorTask to nextCursorTask
-          end repeat
-
-          -- Move task under destination parent first (before property edits)
-          move foundItem to end of tasks of destinationParentTask
-          set end of changedProperties to "moved (parent task)"
-`;
-    }
-  }
-
-  // Common property updates for both tasks and projects
-  if (params.newName !== undefined) {
-    script += `
-          -- Update name
-          set name of foundItem to "${params.newName.replace(/["\\]/g, '\\$&')}"
-          set end of changedProperties to "name"
-`;
-  }
-
-  if (params.newNote !== undefined) {
-    const escapedNote = params.newNote
-      .replace(/["\\]/g, '\\$&')
-      .replace(/\r\n|\r|\n/g, '" & return & "');
-    script += `
-          -- Update note
-          set note of foundItem to "${escapedNote}"
-          set end of changedProperties to "note"
-`;
-  }
-
-  if (params.newDueDate !== undefined) {
-    if (params.newDueDate === '') {
-      script += `
-          -- Clear due date
-          set due date of foundItem to missing value
-          set end of changedProperties to "due date"
-`;
-    } else {
-      script += `
-          -- Update due date
-          set due date of foundItem to newDueDateValue
-          set end of changedProperties to "due date"
-`;
-    }
-  }
-
-  if (params.newDeferDate !== undefined) {
-    if (params.newDeferDate === '') {
-      script += `
-          -- Clear defer date
-          set defer date of foundItem to missing value
-          set end of changedProperties to "defer date"
-`;
-    } else {
-      script += `
-          -- Update defer date
-          set defer date of foundItem to newDeferDateValue
-          set end of changedProperties to "defer date"
-`;
-    }
-  }
-
-  if (params.newPlannedDate !== undefined) {
-    if (params.newPlannedDate === '') {
-      script += `
-          -- Clear planned date
-          set planned date of foundItem to missing value
-          set end of changedProperties to "planned date"
-`;
-    } else {
-      script += `
-          -- Update planned date
-          set planned date of foundItem to newPlannedDateValue
-          set end of changedProperties to "planned date"
-`;
-    }
-  }
-
-  if (params.newFlagged !== undefined) {
-    script += `
-          -- Update flagged status
-          set flagged of foundItem to ${params.newFlagged}
-          set end of changedProperties to "flagged"
-`;
-  }
-
-  if (params.newEstimatedMinutes !== undefined) {
-    script += `
-          -- Update estimated minutes
-          set estimated minutes of foundItem to ${params.newEstimatedMinutes}
-          set end of changedProperties to "estimated minutes"
-`;
-  }
-
-  // Task-specific updates
-  if (itemType === 'task') {
-    // Update task status
-    if (params.newStatus !== undefined) {
-      if (params.newStatus === 'completed') {
-        script += `
-          -- Mark task as completed
-          mark complete foundItem
-          set end of changedProperties to "status (completed)"
-`;
-      } else if (params.newStatus === 'dropped') {
-        script += `
-          -- Mark task as dropped
-          set dropped of foundItem to true
-          set end of changedProperties to "status (dropped)"
-`;
-      } else if (params.newStatus === 'incomplete') {
-        script += `
-          -- Mark task as incomplete
-          mark incomplete foundItem
-          set end of changedProperties to "status (incomplete)"
-`;
-      }
-    }
-
-    // Handle tag operations
-    if (params.replaceTags && params.replaceTags.length > 0) {
-      const tagsList = params.replaceTags.map(tag => `"${tag.replace(/["\\]/g, '\\$&')}"`).join(', ');
-      script += `
-          -- Replace all tags
-          set tagNames to {${tagsList}}
-          set existingTags to tags of foundItem
-
-          -- Clear existing tags in reverse to avoid iteration bug
-          set tagCount to count of existingTags
-          repeat with i from tagCount to 1 by -1
-            remove (item i of existingTags) from tags of foundItem
-          end repeat
-
-          -- Then add new tags
-          repeat with tagName in tagNames
-            set tagObj to missing value
-            try
-              set tagObj to first flattened tag where name = tagName
-            end try
-            if tagObj is missing value then
-              set tagObj to make new tag with properties {name:tagName}
-            end if
-            add tagObj to tags of foundItem
-          end repeat
-          set end of changedProperties to "tags (replaced)"
-`;
-    } else {
-      // Add tags if specified
-      if (params.addTags && params.addTags.length > 0) {
-        const tagsList = params.addTags.map(tag => `"${tag.replace(/["\\]/g, '\\$&')}"`).join(', ');
-        script += `
-          -- Add tags
-          set tagNames to {${tagsList}}
-          repeat with tagName in tagNames
-            set tagObj to missing value
-            try
-              set tagObj to first flattened tag where name = tagName
-            end try
-            if tagObj is missing value then
-              set tagObj to make new tag with properties {name:tagName}
-            end if
-            add tagObj to tags of foundItem
-          end repeat
-          set end of changedProperties to "tags (added)"
-`;
-      }
-
-      // Remove tags if specified
-      if (params.removeTags && params.removeTags.length > 0) {
-        const tagsList = params.removeTags.map(tag => `"${tag.replace(/["\\]/g, '\\$&')}"`).join(', ');
-        script += `
-          -- Remove tags
-          set tagNames to {${tagsList}}
-          repeat with tagName in tagNames
-            try
-              set tagObj to first flattened tag where name = tagName
-              remove tagObj from tags of foundItem
-            end try
-          end repeat
-          set end of changedProperties to "tags (removed)"
-`;
-      }
-    }
-  }
-
-  // Project-specific updates
-  if (itemType === 'project') {
-    // Update sequential status
-    if (params.newSequential !== undefined) {
-      script += `
-          -- Update sequential status
-          set sequential of foundItem to ${params.newSequential}
-          set end of changedProperties to "sequential"
-`;
-    }
-
-    // Update project status
-    if (params.newProjectStatus !== undefined) {
-      const statusValue = params.newProjectStatus === 'active' ? 'active status' :
-        params.newProjectStatus === 'completed' ? 'done status' :
-          params.newProjectStatus === 'dropped' ? 'dropped status' :
-            'on hold status';
-      script += `
-          -- Update project status
-          set status of foundItem to ${statusValue}
-          set end of changedProperties to "status"
-`;
-    }
-
-    // Move to a new folder
-    if (params.newFolderName !== undefined) {
-      const folderName = params.newFolderName.replace(/["\\]/g, '\\$&');
-      script += `
-          -- Move to new folder
-          set destFolder to missing value
-          try
-            set destFolder to first flattened folder where name = "${folderName}"
-          end try
-
-          if destFolder is missing value then
-            -- Create the folder if it doesn't exist
-            set destFolder to make new folder with properties {name:"${folderName}"}
-          end if
-
-          -- Move project to the folder
-          move foundItem to destFolder
-          set end of changedProperties to "folder"
-`;
-    }
-  }
-
-  script += `
-          -- Prepare the changed properties as a string
-          set changedPropsText to ""
-          repeat with i from 1 to count of changedProperties
-            set changedPropsText to changedPropsText & item i of changedProperties
-            if i < count of changedProperties then
-              set changedPropsText to changedPropsText & ", "
-            end if
-          end repeat
-
-          -- JSON-escape itemName for safe embedding in return value
-          set prevDelims to AppleScript's text item delimiters
-          set AppleScript's text item delimiters to "\\\\"
-          set nameParts to text items of itemName
-          set AppleScript's text item delimiters to "\\\\\\\\"
-          set itemNameJson to nameParts as text
-          set AppleScript's text item delimiters to "\\""
-          set nameParts to text items of itemNameJson
-          set AppleScript's text item delimiters to "\\\\\\""
-          set itemNameJson to nameParts as text
-          set AppleScript's text item delimiters to prevDelims
-
-          -- Return success with details
-          return "{\\\"success\\\":true,\\\"id\\\":\\"" & itemId & "\\",\\\"name\\\":\\"" & itemNameJson & "\\",\\\"changedProperties\\\":\\"" & changedPropsText & "\\"}"
-        else
-          -- Item not found
-          return "{\\\"success\\\":false,\\\"error\\\":\\\"Item not found\\\"}"
-        end if
-      end tell
-    end tell
-  on error errorMessage
-    return "{\\\"success\\\":false,\\\"error\\\":\\"" & errorMessage & "\\"}"
-  end try
-  `;
-
-  return script;
-}
-
-/**
  * Edit a task or project in OmniFocus
  */
 export async function editItem(params: EditItemParams): Promise<{
@@ -553,54 +111,244 @@ export async function editItem(params: EditItemParams): Promise<{
   try {
     const validation = validateEditItemParams(params);
     if (!validation.valid) {
-      return {
-        success: false,
-        error: validation.error
-      };
+      return { success: false, error: validation.error };
     }
 
-    // Generate AppleScript
-    const script = generateAppleScript(params);
+    const script = `
+      const collection = args.itemType === 'task' ? flattenedTasks : flattenedProjects;
+      const changedProperties = [];
 
-    console.error('Executing AppleScript for editing...');
-    console.error(`Item type: ${params.itemType}, ID: ${params.id || 'not provided'}, Name: ${params.name || 'not provided'}`);
+      // Find the item
+      let item;
+      if (args.id) {
+        item = collection.filter(o => o.id.primaryKey === args.id)[0];
+      }
+      if (!item && args.name) {
+        const matches = collection.filter(o => o.name === args.name);
+        if (matches.length > 1) {
+          return JSON.stringify({
+            success: false,
+            error: 'Ambiguous ' + args.itemType + ' name: ' + args.name + '. Multiple matches found; please use id.'
+          });
+        }
+        item = matches[0];
+      }
+      if (!item) {
+        return JSON.stringify({ success: false, error: 'Item not found' });
+      }
 
-    // Log a preview of the script for debugging (first few lines)
-    const scriptPreview = script.split('\n').slice(0, 10).join('\n') + '\n...';
-    console.error('AppleScript preview:\n', scriptPreview);
+      const itemId = item.id.primaryKey;
+      const itemName = item.name;
 
-    // Execute AppleScript using temp file (avoids shell escaping issues)
-    const stdout = await executeAppleScript(script);
+      // --- Task move (do first, before property edits) ---
+      if (args.itemType === 'task') {
+        if (args.moveToInbox === true) {
+          moveTasks([item], inbox.ending);
+          changedProperties.push('moved (inbox)');
+        } else if (args.newProjectId || args.newProjectName) {
+          let destProject;
+          if (args.newProjectId) {
+            destProject = flattenedProjects.filter(p => p.id.primaryKey === args.newProjectId)[0];
+            if (!destProject) {
+              return JSON.stringify({ success: false, error: 'Destination project not found with ID: ' + args.newProjectId });
+            }
+          } else {
+            const matches = flattenedProjects.filter(p => p.name === args.newProjectName);
+            if (matches.length === 0) {
+              return JSON.stringify({ success: false, error: 'Destination project not found with name: ' + args.newProjectName });
+            }
+            if (matches.length > 1) {
+              return JSON.stringify({ success: false, error: 'Ambiguous destination project name: ' + args.newProjectName + '. Multiple matches found; please use project id.' });
+            }
+            destProject = matches[0];
+          }
+          moveTasks([item], destProject.ending);
+          changedProperties.push('moved (project)');
+        } else if (args.newParentTaskId || args.newParentTaskName) {
+          let destParent;
+          if (args.newParentTaskId) {
+            destParent = flattenedTasks.filter(t => t.id.primaryKey === args.newParentTaskId)[0];
+            if (!destParent) {
+              return JSON.stringify({ success: false, error: 'Destination parent task not found with ID: ' + args.newParentTaskId });
+            }
+          } else {
+            const matches = flattenedTasks.filter(t => t.name === args.newParentTaskName);
+            if (matches.length === 0) {
+              return JSON.stringify({ success: false, error: 'Destination parent task not found with name: ' + args.newParentTaskName });
+            }
+            if (matches.length > 1) {
+              return JSON.stringify({ success: false, error: 'Ambiguous destination parent task name: ' + args.newParentTaskName + '. Multiple matches found; please use parent task id.' });
+            }
+            destParent = matches[0];
+          }
 
-    console.error('AppleScript stdout:', stdout);
+          // Cycle prevention: walk up from destParent, ensure we don't find item
+          let cursor = destParent;
+          while (cursor) {
+            if (cursor.id.primaryKey === itemId) {
+              return JSON.stringify({ success: false, error: 'Invalid move target: cannot move a task into itself or its descendants.' });
+            }
+            const parent = cursor.parent;
+            cursor = (parent && parent.constructor === Task) ? parent : null;
+          }
 
-    // Parse the result
-    try {
-      const result = JSON.parse(stdout);
+          moveTasks([item], destParent.ending);
+          changedProperties.push('moved (parent task)');
+        }
+      }
 
-      // Return the result
-      return {
-        success: result.success,
-        id: result.id,
-        name: result.name,
-        changedProperties: result.changedProperties,
-        error: result.error
-      };
-    } catch (parseError) {
-      console.error('Error parsing AppleScript result:', parseError);
-      return {
-        success: false,
-        error: `Failed to parse result: ${stdout}`
-      };
-    }
+      // --- Common property updates ---
+      if (args.newName !== undefined) {
+        item.name = args.newName;
+        changedProperties.push('name');
+      }
+
+      if (args.newNote !== undefined) {
+        item.note = args.newNote;
+        changedProperties.push('note');
+      }
+
+      if (args.newDueDate !== undefined) {
+        if (args.newDueDate === '') {
+          item.dueDate = null;
+        } else {
+          item.dueDate = new Date(args.newDueDate);
+        }
+        changedProperties.push('due date');
+      }
+
+      if (args.newDeferDate !== undefined) {
+        if (args.newDeferDate === '') {
+          item.deferDate = null;
+        } else {
+          item.deferDate = new Date(args.newDeferDate);
+        }
+        changedProperties.push('defer date');
+      }
+
+      if (args.newPlannedDate !== undefined) {
+        try {
+          if (args.newPlannedDate === '') {
+            item.plannedDate = null;
+          } else {
+            item.plannedDate = new Date(args.newPlannedDate);
+          }
+          changedProperties.push('planned date');
+        } catch(e) {}
+      }
+
+      if (args.newFlagged !== undefined) {
+        item.flagged = args.newFlagged;
+        changedProperties.push('flagged');
+      }
+
+      if (args.newEstimatedMinutes !== undefined) {
+        item.estimatedMinutes = args.newEstimatedMinutes;
+        changedProperties.push('estimated minutes');
+      }
+
+      // --- Task-specific updates ---
+      if (args.itemType === 'task') {
+        if (args.newStatus !== undefined) {
+          if (args.newStatus === 'completed') {
+            item.markComplete();
+            changedProperties.push('status (completed)');
+          } else if (args.newStatus === 'dropped') {
+            item.drop(true);
+            changedProperties.push('status (dropped)');
+          } else if (args.newStatus === 'incomplete') {
+            item.markIncomplete();
+            changedProperties.push('status (incomplete)');
+          }
+        }
+
+        // Tag operations
+        if (args.replaceTags && args.replaceTags.length > 0) {
+          // Clear all existing tags
+          item.clearTags();
+          // Add new tags
+          for (const tagName of args.replaceTags) {
+            let tag = flattenedTags.filter(t => t.name === tagName)[0];
+            if (!tag) tag = new Tag(tagName);
+            item.addTag(tag);
+          }
+          changedProperties.push('tags (replaced)');
+        } else {
+          if (args.addTags && args.addTags.length > 0) {
+            for (const tagName of args.addTags) {
+              let tag = flattenedTags.filter(t => t.name === tagName)[0];
+              if (!tag) tag = new Tag(tagName);
+              item.addTag(tag);
+            }
+            changedProperties.push('tags (added)');
+          }
+
+          if (args.removeTags && args.removeTags.length > 0) {
+            for (const tagName of args.removeTags) {
+              const tag = flattenedTags.filter(t => t.name === tagName)[0];
+              if (tag) {
+                item.removeTag(tag);
+              }
+            }
+            changedProperties.push('tags (removed)');
+          }
+        }
+      }
+
+      // --- Project-specific updates ---
+      if (args.itemType === 'project') {
+        if (args.newSequential !== undefined) {
+          item.sequential = args.newSequential;
+          changedProperties.push('sequential');
+        }
+
+        if (args.newProjectStatus !== undefined) {
+          const statusMap = {
+            'active': Project.Status.Active,
+            'completed': Project.Status.Done,
+            'dropped': Project.Status.Dropped,
+            'onHold': Project.Status.OnHold
+          };
+          const newStatus = statusMap[args.newProjectStatus];
+          if (newStatus !== undefined) {
+            if (args.newProjectStatus === 'completed') {
+              item.markComplete();
+            } else if (args.newProjectStatus === 'dropped') {
+              item.drop(true);
+            } else {
+              item.status = newStatus;
+            }
+            changedProperties.push('status');
+          }
+        }
+
+        if (args.newFolderName !== undefined) {
+          let destFolder = flattenedFolders.filter(f => f.name === args.newFolderName)[0];
+          if (!destFolder) {
+            destFolder = new Folder(args.newFolderName);
+          }
+          moveProjects([item], destFolder);
+          changedProperties.push('folder');
+        }
+      }
+
+      return JSON.stringify({
+        success: true,
+        id: itemId,
+        name: item.name,
+        changedProperties: changedProperties.join(', ')
+      });
+    `;
+
+    const result = await runOmniJs(script, params);
+    return {
+      success: result.success,
+      id: result.id,
+      name: result.name,
+      changedProperties: result.changedProperties,
+      error: result.error
+    };
   } catch (error: any) {
-    console.error('Error in editItem execution:', error);
-
-    // Include more detailed error information
-    if (error.message && error.message.includes('syntax error')) {
-      console.error('This appears to be an AppleScript syntax error. Review the script generation logic.');
-    }
-
     return {
       success: false,
       error: error?.message || 'Unknown error in editItem'

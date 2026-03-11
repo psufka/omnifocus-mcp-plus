@@ -34,11 +34,15 @@ import * as getProjectCountsTool from './tools/definitions/getProjectCounts.js';
 import * as getTaskCountsTool from './tools/definitions/getTaskCounts.js';
 import * as folderTools from './tools/definitions/folderTools.js';
 import * as tagTools from './tools/definitions/tagTools.js';
+import * as listSubtasksTool from './tools/definitions/listSubtasks.js';
+import * as duplicateTaskTool from './tools/definitions/duplicateTask.js';
+import * as batchMoveTasksTool from './tools/definitions/batchMoveTasks.js';
+import * as notificationTools from './tools/definitions/notificationTools.js';
 
 // Create an MCP server
 const server = new McpServer({
   name: "OmniFocus MCP Plus",
-  version: "0.2.0"
+  version: "0.3.0"
 });
 
 // Register tools
@@ -286,6 +290,50 @@ server.tool(
   "Delete an OmniFocus tag",
   tagTools.deleteTagSchema.shape,
   tagTools.deleteTagHandler
+);
+
+// New Phase 2 tools
+server.tool(
+  "list_subtasks",
+  "List children (subtasks) of a task, optionally recursive to show full hierarchy",
+  listSubtasksTool.schema.shape,
+  listSubtasksTool.handler
+);
+
+server.tool(
+  "duplicate_task",
+  "Duplicate an existing task, optionally into a different project. Copies name, note, dates, flags, tags.",
+  duplicateTaskTool.schema.shape,
+  duplicateTaskTool.handler
+);
+
+server.tool(
+  "batch_move_tasks",
+  "Move multiple tasks to a project, parent task, or inbox in a single operation",
+  batchMoveTasksTool.schema.shape,
+  batchMoveTasksTool.handler
+);
+
+// Notification tools
+server.tool(
+  "list_notifications",
+  "List all notifications (reminders) on a task",
+  notificationTools.listNotificationsSchema.shape,
+  notificationTools.listNotificationsHandler
+);
+
+server.tool(
+  "add_notification",
+  "Add a notification (reminder) to a task — absolute date or relative to due date",
+  notificationTools.addNotificationSchema.shape,
+  notificationTools.addNotificationHandler
+);
+
+server.tool(
+  "remove_notification",
+  "Remove a notification (reminder) from a task by index",
+  notificationTools.removeNotificationSchema.shape,
+  notificationTools.removeNotificationHandler
 );
 
 // Start the MCP server

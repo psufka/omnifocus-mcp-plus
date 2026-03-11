@@ -70,6 +70,8 @@
           deferDate: task.deferDate ? task.deferDate.toISOString() : null,
           plannedDate: task.plannedDate ? task.plannedDate.toISOString() : null,
           completedDate: task.completionDate ? task.completionDate.toISOString() : null,
+          effectiveDueDate: task.effectiveDueDate ? task.effectiveDueDate.toISOString() : null,
+          effectiveDeferDate: task.effectiveDeferDate ? task.effectiveDeferDate.toISOString() : null,
           estimatedMinutes: task.estimatedMinutes,
           projectId: task.containingProject ? task.containingProject.id.primaryKey : null,
           projectName: task.containingProject ? task.containingProject.name : null,

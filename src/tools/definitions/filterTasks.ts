@@ -27,6 +27,7 @@ export const schema = z.object({
   projectFilter: z.string().optional().describe("Filter by project name (partial match)"),
   tagFilter: z.union([z.string(), z.array(z.string())]).optional().describe("Filter by tag name(s). Can be single tag or array of tags"),
   exactTagMatch: z.boolean().optional().describe("Set to true for exact tag name match, false for partial (default: false)"),
+  tagMatchMode: z.enum(["any", "all"]).optional().describe("Match any tag (OR, default) or all tags (AND)"),
 
   // Due date filters
   dueBefore: z.string().optional().describe("Show tasks due before this date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00)"),

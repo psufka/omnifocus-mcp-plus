@@ -17,7 +17,9 @@ export interface TaskInfo {
   childrenCount: number;
   tags: string[];
   dueDate?: string;
+  effectiveDueDate?: string;
   deferDate?: string;
+  effectiveDeferDate?: string;
   plannedDate?: string;
   flagged: boolean;
   completed: boolean;
@@ -60,7 +62,9 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
         childrenCount: children.length,
         tags: task.tags.map(t => t.name),
         dueDate: task.dueDate ? task.dueDate.toISOString() : undefined,
+        effectiveDueDate: task.effectiveDueDate ? task.effectiveDueDate.toISOString() : undefined,
         deferDate: task.deferDate ? task.deferDate.toISOString() : undefined,
+        effectiveDeferDate: task.effectiveDeferDate ? task.effectiveDeferDate.toISOString() : undefined,
         plannedDate: plannedDate || undefined,
         flagged: task.flagged,
         completed: task.taskStatus === Task.Status.Completed,
