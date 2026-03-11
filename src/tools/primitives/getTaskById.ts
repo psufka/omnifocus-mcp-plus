@@ -100,12 +100,14 @@ function generateGetTaskScript(params: GetTaskByIdParams): string {
         try
           if due date of theTask is not missing value then
             set d to due date of theTask
-            set y to year of d as string
-            set m to text -2 thru -1 of ("0" & ((month of d) as integer))
-            set dy to text -2 thru -1 of ("0" & (day of d))
-            set h to text -2 thru -1 of ("0" & (hours of d))
-            set mn to text -2 thru -1 of ("0" & (minutes of d))
-            set s to text -2 thru -1 of ("0" & (seconds of d))
+            tell current application
+              set y to year of d as string
+              set m to text -2 thru -1 of ("0" & ((month of d) as integer))
+              set dy to text -2 thru -1 of ("0" & (day of d))
+              set h to text -2 thru -1 of ("0" & (hours of d))
+              set mn to text -2 thru -1 of ("0" & (minutes of d))
+              set s to text -2 thru -1 of ("0" & (seconds of d))
+            end tell
             set taskDueDate to y & "-" & m & "-" & dy & "T" & h & ":" & mn & ":" & s
           end if
         end try
@@ -113,12 +115,14 @@ function generateGetTaskScript(params: GetTaskByIdParams): string {
         try
           if defer date of theTask is not missing value then
             set d to defer date of theTask
-            set y to year of d as string
-            set m to text -2 thru -1 of ("0" & ((month of d) as integer))
-            set dy to text -2 thru -1 of ("0" & (day of d))
-            set h to text -2 thru -1 of ("0" & (hours of d))
-            set mn to text -2 thru -1 of ("0" & (minutes of d))
-            set s to text -2 thru -1 of ("0" & (seconds of d))
+            tell current application
+              set y to year of d as string
+              set m to text -2 thru -1 of ("0" & ((month of d) as integer))
+              set dy to text -2 thru -1 of ("0" & (day of d))
+              set h to text -2 thru -1 of ("0" & (hours of d))
+              set mn to text -2 thru -1 of ("0" & (minutes of d))
+              set s to text -2 thru -1 of ("0" & (seconds of d))
+            end tell
             set taskDeferDate to y & "-" & m & "-" & dy & "T" & h & ":" & mn & ":" & s
           end if
         end try
@@ -126,12 +130,14 @@ function generateGetTaskScript(params: GetTaskByIdParams): string {
         try
           if planned date of theTask is not missing value then
             set d to planned date of theTask
-            set y to year of d as string
-            set m to text -2 thru -1 of ("0" & ((month of d) as integer))
-            set dy to text -2 thru -1 of ("0" & (day of d))
-            set h to text -2 thru -1 of ("0" & (hours of d))
-            set mn to text -2 thru -1 of ("0" & (minutes of d))
-            set s to text -2 thru -1 of ("0" & (seconds of d))
+            tell current application
+              set y to year of d as string
+              set m to text -2 thru -1 of ("0" & ((month of d) as integer))
+              set dy to text -2 thru -1 of ("0" & (day of d))
+              set h to text -2 thru -1 of ("0" & (hours of d))
+              set mn to text -2 thru -1 of ("0" & (minutes of d))
+              set s to text -2 thru -1 of ("0" & (seconds of d))
+            end tell
             set taskPlannedDate to y & "-" & m & "-" & dy & "T" & h & ":" & mn & ":" & s
           end if
         end try
