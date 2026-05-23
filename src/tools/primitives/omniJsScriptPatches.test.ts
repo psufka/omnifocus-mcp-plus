@@ -38,7 +38,10 @@ test('editItem primitive supports newFolderId lookup (v0.3.3 follow-up)', () => 
 
 test('editItem primitive supports slash-path folder resolution (v0.3.3 follow-up)', () => {
   const src = readPrimitive('editItem.ts');
-  assert.match(src, /newFolderName\.split\('\/'\)/, 'editItem missing path split on /');
+  assert.match(src, /resolveFolderPath/, 'editItem missing recursive resolveFolderPath helper');
   assert.match(src, /newFolderName\.indexOf\('\/'\)/, 'editItem missing path-detection check on /');
   assert.match(src, /f\.parent && f\.parent\.id\.primaryKey/, 'editItem missing parent-walk filter for path resolution');
+  // The resolver must split on '/' from the rightmost position so the longest
+  // literal prefix wins — required for folder names that themselves contain '/'.
+  assert.match(src, /for \(let i = pathStr\.length - 1; i >= 0; i--\)/, 'editItem resolver not iterating from rightmost slash');
 });

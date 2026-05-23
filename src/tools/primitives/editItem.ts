@@ -337,18 +337,37 @@ export async function editItem(params: EditItemParams): Promise<{
             return JSON.stringify({ success: false, error: 'Folder not found with ID: ' + args.newFolderId });
           }
         } else if (args.newFolderName !== undefined) {
+          // Recursive path resolver. Tries the input as a literal folder name first
+          // (so a folder literally named e.g. 'Someday/Maybe' wins). If not a unique
+          // match, splits at each '/' position (rightmost first → longest literal
+          // prefix preferred) and recursively resolves parent + child. Handles paths
+          // where an intermediate segment itself contains '/' in its literal name.
+          const resolveFolderPath = function(pathStr) {
+            const literal = flattenedFolders.filter(f => f.name === pathStr);
+            if (literal.length === 1) return literal[0];
+            for (let i = pathStr.length - 1; i >= 0; i--) {
+              if (pathStr[i] === '/') {
+                const parentPath = pathStr.substring(0, i);
+                const leafName = pathStr.substring(i + 1);
+                const parent = resolveFolderPath(parentPath);
+                if (parent) {
+                  const child = flattenedFolders.filter(f =>
+                    f.parent && f.parent.id.primaryKey === parent.id.primaryKey && f.name === leafName
+                  );
+                  if (child.length === 1) return child[0];
+                }
+              }
+            }
+            return null;
+          };
+
           // Tier 1: literal name match. Wins even when name contains '/' so existing folders like '📀Resources/Archives ' keep working.
           let folderMatches = flattenedFolders.filter(f => f.name === args.newFolderName);
 
-          // Tier 2: if literal didn't uniquely resolve AND name looks like a path, walk segments from root.
+          // Tier 2: if literal didn't uniquely resolve AND name looks like a path, resolve recursively.
           if (folderMatches.length !== 1 && args.newFolderName.indexOf('/') !== -1) {
-            const segments = args.newFolderName.split('/');
-            let cursor = flattenedFolders.filter(f => !f.parent && f.name === segments[0]);
-            for (let i = 1; i < segments.length && cursor.length === 1; i++) {
-              const parent = cursor[0];
-              cursor = flattenedFolders.filter(f => f.parent && f.parent.id.primaryKey === parent.id.primaryKey && f.name === segments[i]);
-            }
-            if (cursor.length === 1) folderMatches = cursor;
+            const resolved = resolveFolderPath(args.newFolderName);
+            if (resolved) folderMatches = [resolved];
           }
 
           if (folderMatches.length === 0) {
