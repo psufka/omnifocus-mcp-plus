@@ -1,17 +1,17 @@
 import { z } from 'zod';
-import { getProjectCounts } from '../primitives/getProjectCounts.js';
+import { completeTask } from '../primitives/completeTask.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 
 export const schema = z.object({
-  folder: z.string().optional().describe("Optional folder name to scope counts to")
+  task_id: z.string().describe("The ID of the task to mark completed")
 }).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {
-    const result = await getProjectCounts(args);
+    const result = await completeTask(args.task_id);
     if (result.success) {
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }]
+        content: [{ type: "text" as const, text: `Marked task "${result.name}" as completed` }]
       };
     } else {
       return {
@@ -22,7 +22,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
   } catch (err: unknown) {
     const error = err as Error;
     return {
-      content: [{ type: "text" as const, text: `Error getting project counts: ${error.message}` }],
+      content: [{ type: "text" as const, text: `Error completing task: ${error.message}` }],
       isError: true
     };
   }

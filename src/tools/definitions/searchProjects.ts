@@ -5,7 +5,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 export const schema = z.object({
   query: z.string().describe("Search query to match against project names"),
   limit: z.number().min(1).max(200).optional().describe("Maximum number of results (default: 50)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

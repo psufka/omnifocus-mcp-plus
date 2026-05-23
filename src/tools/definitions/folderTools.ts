@@ -5,7 +5,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 // --- list_folders ---
 export const listFoldersSchema = z.object({
   limit: z.number().min(1).max(500).optional().describe("Maximum number of folders to return (default: 100)")
-});
+}).strict();
 
 export async function listFoldersHandler(args: z.infer<typeof listFoldersSchema>, extra: RequestHandlerExtra) {
   try {
@@ -22,7 +22,7 @@ export async function listFoldersHandler(args: z.infer<typeof listFoldersSchema>
 // --- get_folder ---
 export const getFolderSchema = z.object({
   name_or_id: z.string().describe("Folder name or ID to look up")
-});
+}).strict();
 
 export async function getFolderHandler(args: z.infer<typeof getFolderSchema>, extra: RequestHandlerExtra) {
   try {
@@ -40,7 +40,7 @@ export async function getFolderHandler(args: z.infer<typeof getFolderSchema>, ex
 export const createFolderSchema = z.object({
   name: z.string().describe("Name for the new folder"),
   parent: z.string().optional().describe("Parent folder name or ID (creates at top level if omitted)")
-});
+}).strict();
 
 export async function createFolderHandler(args: z.infer<typeof createFolderSchema>, extra: RequestHandlerExtra) {
   try {
@@ -59,7 +59,7 @@ export const updateFolderSchema = z.object({
   name_or_id: z.string().describe("Folder name or ID to update"),
   name: z.string().optional().describe("New name for the folder"),
   status: z.enum(['active', 'dropped']).optional().describe("New status for the folder")
-});
+}).strict();
 
 export async function updateFolderHandler(args: z.infer<typeof updateFolderSchema>, extra: RequestHandlerExtra) {
   try {
@@ -76,7 +76,7 @@ export async function updateFolderHandler(args: z.infer<typeof updateFolderSchem
 // --- delete_folder ---
 export const deleteFolderSchema = z.object({
   name_or_id: z.string().describe("Folder name or ID to delete. WARNING: deleting a folder deletes all projects inside it.")
-});
+}).strict();
 
 export async function deleteFolderHandler(args: z.infer<typeof deleteFolderSchema>, extra: RequestHandlerExtra) {
   try {

@@ -10,7 +10,7 @@ export const schema = z.object({
   newProjectName: z.string().optional().describe("Project name to place the duplicate in"),
   includeTags: z.boolean().optional().describe("Copy tags from source (default: true)"),
   includeNote: z.boolean().optional().describe("Copy note from source (default: true)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

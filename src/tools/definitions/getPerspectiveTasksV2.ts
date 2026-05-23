@@ -17,7 +17,7 @@ export const schema = z.object({
 
   displayMode: z.enum(['project_tree', 'task_tree', 'flat']).optional().default('project_tree')
     .describe("Display mode: project_tree (by project + subtask tree), task_tree (global task tree), flat (flat list)")
-});
+}).strict();
 
 export type GetPerspectiveTasksV2Params = z.infer<typeof schema>;
 

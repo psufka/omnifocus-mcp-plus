@@ -6,7 +6,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 export const listNotificationsSchema = z.object({
   taskId: z.string().optional().describe("The ID of the task"),
   taskName: z.string().optional().describe("The name of the task (alternative to taskId)")
-});
+}).strict();
 
 export async function listNotificationsHandler(args: z.infer<typeof listNotificationsSchema>, extra: RequestHandlerExtra) {
   try {
@@ -47,7 +47,7 @@ export const addNotificationSchema = z.object({
   type: z.enum(["absolute", "relative"]).describe("Notification type: 'absolute' for a specific date/time, 'relative' for minutes before due date"),
   date: z.string().optional().describe("ISO date string for absolute notifications (e.g., 2026-03-15T09:00:00-05:00)"),
   minutesBefore: z.number().optional().describe("Minutes before due date for relative notifications (e.g., 30 for 30 minutes before)")
-});
+}).strict();
 
 export async function addNotificationHandler(args: z.infer<typeof addNotificationSchema>, extra: RequestHandlerExtra) {
   try {
@@ -70,7 +70,7 @@ export const removeNotificationSchema = z.object({
   taskId: z.string().optional().describe("The ID of the task"),
   taskName: z.string().optional().describe("The name of the task (alternative to taskId)"),
   index: z.number().describe("Index of the notification to remove (use list_notifications to see indices)")
-});
+}).strict();
 
 export async function removeNotificationHandler(args: z.infer<typeof removeNotificationSchema>, extra: RequestHandlerExtra) {
   try {

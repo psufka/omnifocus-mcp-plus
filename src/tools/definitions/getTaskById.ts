@@ -5,7 +5,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 export const schema = z.object({
   taskId: z.string().optional().describe("The ID of the task to retrieve"),
   taskName: z.string().optional().describe("The name of the task to retrieve (alternative to taskId)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

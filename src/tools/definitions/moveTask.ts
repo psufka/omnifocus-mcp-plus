@@ -10,7 +10,7 @@ export const schema = z.object({
   targetParentTaskId: z.string().optional().describe('Destination parent task ID'),
   targetParentTaskName: z.string().optional().describe('Destination parent task name (errors on duplicate names)'),
   targetInbox: z.boolean().optional().describe('Move task to inbox')
-});
+}).strict();
 
 function formatDestination(args: z.infer<typeof schema>): string {
   if (args.targetInbox) {

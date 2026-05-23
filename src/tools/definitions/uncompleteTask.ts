@@ -4,7 +4,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 
 export const schema = z.object({
   task_id: z.string().describe("The ID of the completed task to mark incomplete")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

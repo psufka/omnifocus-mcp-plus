@@ -6,7 +6,7 @@ export const schema = z.object({
   id: z.string().optional().describe("The ID of the task or project to remove"),
   name: z.string().optional().describe("The name of the task or project to remove (as fallback if ID not provided)"),
   itemType: z.enum(['task', 'project']).describe("Type of item to remove ('task' or 'project')")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

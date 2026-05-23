@@ -8,7 +8,7 @@ export const schema = z.object({
   beforeTaskId: z.string().optional().describe("Place task before this sibling task ID"),
   afterTaskId: z.string().optional().describe("Place task after this sibling task ID"),
   position: z.enum(["beginning", "ending"]).optional().describe("Move task to beginning or ending of its container")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

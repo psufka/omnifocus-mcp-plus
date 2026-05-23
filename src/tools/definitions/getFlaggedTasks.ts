@@ -5,7 +5,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 export const schema = z.object({
   hideCompleted: z.boolean().optional().describe("Set to false to show completed flagged tasks (default: true)"),
   projectFilter: z.string().optional().describe("Filter flagged tasks by project name (optional)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

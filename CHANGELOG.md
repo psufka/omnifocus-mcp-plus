@@ -2,6 +2,22 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.3.2] - 2026-05-23
+
+### Fixed
+- **Silent strip of unknown fields across every tool** — Zod's default "strip" mode was discarding unknown keys before MCP handlers saw them. Concrete consequence: `edit_item({id:"X", itemType:"task", completed:true})` returned `✅ Task updated successfully` while the task stayed open (caller meant `newStatus:"completed"`). Root cause was shared across every tool: schemas were vanilla `z.object({...})`, and the MCP SDK reconstructs schemas via `z.object(shape)` at registration so chaining `.strict()` on the exported schema alone would not propagate. Fix: every schema (including nested item shapes in batch tools) now chains `.strict()`, and a new `registerStrictTool()` helper overwrites the SDK's internal `inputSchema` with the strict version after registration. Unknown fields now return `Invalid arguments for tool X: Unrecognized key(s) ...`. Advertised JSON Schemas also tighten with `additionalProperties: false` so MCP clients know the contract.
+- **`npm test` only ran first-level globs** — `src/**/*.test.ts` was unquoted, so the shell expanded `**` to `*` (zsh default; sh/bash without globstar). All tests under `src/tools/**` were silently skipped. Quoted the glob; test count went from 10 to 84.
+
+### Added
+- **`complete_task`** (42 total) — convenience tool mirroring `uncomplete_task`. Marks a task complete by ID; errors if already completed. Existing `edit_item({newStatus:"completed"})` pathway is unchanged.
+
+### Changed
+- **Field-name unification with backward-compat aliasing** — `batch_add_items` now prefers `items[].itemType` (matches `edit_item` / `remove_item` / `batch_remove_items`); the legacy `items[].type` still works. `append_to_note` now prefers `itemType` and `id`; legacy `object_type` and `object_id` still work. Either spelling is accepted on input; deprecated forms will be removed in a future major release.
+
+### Notes for callers
+- `filter_tasks` substring search of names+notes has always lived on `searchText`. Callers passing `taskName` or `search` previously silently fell back to the default sorted list; with strict validation, those calls now error clearly.
+- Other field-name patterns are intentionally untouched: `add_notification`'s `type` is the notification kind (absolute/relative), and `set_task_repetition`'s `schedule_type` is the repetition mode — neither is an item-type field.
+
 ## [0.3.1] - 2026-03-11
 
 ### Added

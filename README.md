@@ -1,6 +1,6 @@
 # OmniFocus MCP Plus
 
-A comprehensive MCP server for OmniFocus 4 with 41 tools covering task management, project/folder/tag CRUD, custom perspectives, notifications, and advanced filtering.
+A comprehensive MCP server for OmniFocus 4 with 42 tools covering task management, project/folder/tag CRUD, custom perspectives, notifications, and advanced filtering.
 
 Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
@@ -20,7 +20,7 @@ claude mcp add omnifocus -- node "$(pwd)/dist/server.js"
 
 Restart Claude Code to pick up the new server.
 
-## Tools (41)
+## Tools (42)
 
 ### Task Management
 | Tool | Description |
@@ -32,6 +32,7 @@ Restart Claude Code to pick up the new server.
 | `duplicate_task` | Duplicate a task with note, dates, flags, tags; optionally into a different project |
 | `get_task_by_id` | Get task details by ID or name |
 | `list_subtasks` | List children (subtasks), optionally recursive for full hierarchy |
+| `complete_task` | Mark a task as completed |
 | `uncomplete_task` | Mark a completed task as incomplete |
 | `set_task_repetition` | Set/clear repeating schedule (iCal RRULE syntax) |
 | `append_to_note` | Append text to a task or project note |

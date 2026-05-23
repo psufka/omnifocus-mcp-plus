@@ -65,7 +65,7 @@ export const schema = z.object({
   limit: z.number().max(1000).optional().describe("Maximum number of tasks to return (default: 100)"),
   sortBy: z.enum(["name", "dueDate", "deferDate", "plannedDate", "completedDate", "flagged", "project"]).optional().describe("Sort results by field"),
   sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort order (default: asc)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

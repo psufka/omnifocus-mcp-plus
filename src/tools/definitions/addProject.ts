@@ -13,7 +13,7 @@ export const schema = z.object({
   tags: z.array(z.string()).optional().describe("Tags to assign to the project"),
   folderName: z.string().optional().describe("The name of the folder to add the project to (will add to root if not specified)"),
   sequential: z.boolean().optional().describe("Whether tasks in the project should be sequential (default: false)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

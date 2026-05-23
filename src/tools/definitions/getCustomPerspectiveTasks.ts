@@ -10,7 +10,7 @@ export const schema = z.object({
   displayMode: z.enum(['project_tree', 'task_tree', 'flat']).optional().describe("Display mode for perspective tasks: project_tree (group by project + task hierarchy), task_tree (global task hierarchy), or flat (simple list). Default: project_tree"),
   showHierarchy: z.boolean().optional().describe("Display tasks in hierarchical tree structure showing parent-child relationships. Use this when user wants 'hierarchy view' or 'tree view' (default: false)"),
   groupByProject: z.boolean().optional().describe("Legacy parameter. Group tasks by project when displayMode is not provided. Default: true")
-});
+}).strict();
 
 export function resolveCustomPerspectiveDisplayMode(args: Partial<z.infer<typeof schema>>): PerspectiveDisplayMode {
   if (args.displayMode) {

@@ -6,7 +6,7 @@ export const schema = z.object({
   taskId: z.string().optional().describe("The ID of the parent task"),
   taskName: z.string().optional().describe("The name of the parent task (alternative to taskId)"),
   recursive: z.boolean().optional().describe("Include all descendants, not just direct children (default: false)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

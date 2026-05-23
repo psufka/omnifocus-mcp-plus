@@ -14,7 +14,7 @@ export const schema = z.object({
   projectName: z.string().optional().describe("The name of the project to add the task to (will add to inbox if not specified)"),
   parentTaskId: z.string().optional().describe("The ID of the parent task to create this task as a subtask"),
   parentTaskName: z.string().optional().describe("The name of the parent task to create this task as a subtask (alternative to parentTaskId)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

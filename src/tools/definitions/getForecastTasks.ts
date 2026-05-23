@@ -6,7 +6,7 @@ export const schema = z.object({
   days: z.number().min(1).max(30).optional().describe("Number of days to look ahead for forecast (default: 7)"),
   hideCompleted: z.boolean().optional().describe("Set to false to show completed tasks in forecast (default: true)"),
   includeDeferredOnly: z.boolean().optional().describe("Set to true to show only deferred tasks becoming available (default: false)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

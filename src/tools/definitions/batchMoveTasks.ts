@@ -6,13 +6,13 @@ export const schema = z.object({
   tasks: z.array(z.object({
     id: z.string().optional().describe("Task ID"),
     name: z.string().optional().describe("Task name (alternative to ID)")
-  })).describe("Array of tasks to move"),
+  }).strict()).describe("Array of tasks to move"),
   targetProjectId: z.string().optional().describe("Destination project ID"),
   targetProjectName: z.string().optional().describe("Destination project name"),
   targetParentTaskId: z.string().optional().describe("Destination parent task ID"),
   targetParentTaskName: z.string().optional().describe("Destination parent task name"),
   targetInbox: z.boolean().optional().describe("Move tasks to inbox")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

@@ -6,7 +6,7 @@ export const schema = z.object({
   tagName: z.string().describe("Name of the tag to filter tasks by"),
   hideCompleted: z.boolean().optional().describe("Set to false to show completed tasks with this tag (default: true)"),
   exactMatch: z.boolean().optional().describe("Set to true for exact tag name match, false for partial (default: false)")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {

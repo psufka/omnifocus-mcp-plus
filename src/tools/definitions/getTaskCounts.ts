@@ -8,7 +8,7 @@ export const schema = z.object({
   flagged: z.boolean().optional().describe("Filter to flagged (true) or unflagged (false) tasks"),
   dueBefore: z.string().optional().describe("ISO date - only count tasks due before this date"),
   dueAfter: z.string().optional().describe("ISO date - only count tasks due after this date")
-});
+}).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {
