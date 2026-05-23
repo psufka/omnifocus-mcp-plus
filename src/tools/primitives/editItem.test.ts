@@ -80,3 +80,32 @@ test('validateEditItemParams accepts valid project edit', () => {
 
   assert.equal(validation.valid, true);
 });
+
+test('validateEditItemParams rejects both newFolderId and newFolderName', () => {
+  const validation = validateEditItemParams({
+    id: 'project-1',
+    itemType: 'project',
+    newFolderId: 'fldr-abc',
+    newFolderName: 'Travel'
+  });
+  assert.equal(validation.valid, false);
+  assert.match(validation.error || '', /Cannot specify both newFolderId and newFolderName/);
+});
+
+test('validateEditItemParams accepts newFolderId alone', () => {
+  const validation = validateEditItemParams({
+    id: 'project-1',
+    itemType: 'project',
+    newFolderId: 'fldr-abc'
+  });
+  assert.equal(validation.valid, true);
+});
+
+test('validateEditItemParams accepts slash-path newFolderName alone', () => {
+  const validation = validateEditItemParams({
+    id: 'project-1',
+    itemType: 'project',
+    newFolderName: 'Someday/Maybe/Travel'
+  });
+  assert.equal(validation.valid, true);
+});

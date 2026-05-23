@@ -32,7 +32,8 @@ export interface EditItemParams {
 
   // Project-specific fields
   newSequential?: boolean;      // Whether the project should be sequential
-  newFolderName?: string;       // New folder to move the project to
+  newFolderName?: string;       // New folder to move the project to (by name; accepts slash-paths)
+  newFolderId?: string;         // New folder to move the project to (by ID)
   newProjectStatus?: ProjectStatus; // New status for projects
 }
 
@@ -63,6 +64,13 @@ export function validateEditItemParams(params: EditItemParams): { valid: boolean
     return {
       valid: false,
       error: 'Task move parameters are only supported when itemType is "task".'
+    };
+  }
+
+  if (params.newFolderId && params.newFolderName) {
+    return {
+      valid: false,
+      error: 'Cannot specify both newFolderId and newFolderName. Please use only one.'
     };
   }
 
@@ -322,15 +330,37 @@ export async function editItem(params: EditItemParams): Promise<{
           }
         }
 
-        if (args.newFolderName !== undefined) {
-          const folderMatches = flattenedFolders.filter(f => f.name === args.newFolderName);
+        let destFolder = null;
+        if (args.newFolderId) {
+          destFolder = flattenedFolders.filter(f => f.id.primaryKey === args.newFolderId)[0];
+          if (!destFolder) {
+            return JSON.stringify({ success: false, error: 'Folder not found with ID: ' + args.newFolderId });
+          }
+        } else if (args.newFolderName !== undefined) {
+          // Tier 1: literal name match. Wins even when name contains '/' so existing folders like '📀Resources/Archives ' keep working.
+          let folderMatches = flattenedFolders.filter(f => f.name === args.newFolderName);
+
+          // Tier 2: if literal didn't uniquely resolve AND name looks like a path, walk segments from root.
+          if (folderMatches.length !== 1 && args.newFolderName.indexOf('/') !== -1) {
+            const segments = args.newFolderName.split('/');
+            let cursor = flattenedFolders.filter(f => !f.parent && f.name === segments[0]);
+            for (let i = 1; i < segments.length && cursor.length === 1; i++) {
+              const parent = cursor[0];
+              cursor = flattenedFolders.filter(f => f.parent && f.parent.id.primaryKey === parent.id.primaryKey && f.name === segments[i]);
+            }
+            if (cursor.length === 1) folderMatches = cursor;
+          }
+
           if (folderMatches.length === 0) {
-            return JSON.stringify({ success: false, error: 'Folder not found: ' + args.newFolderName + '. Create it first with create_folder.' });
+            return JSON.stringify({ success: false, error: 'Folder not found: ' + args.newFolderName + '. Create it first with create_folder, or pass newFolderId.' });
           }
           if (folderMatches.length > 1) {
-            return JSON.stringify({ success: false, error: 'Ambiguous folder name: ' + args.newFolderName + '. Multiple matches found.' });
+            return JSON.stringify({ success: false, error: 'Ambiguous folder name: ' + args.newFolderName + ". Use a slash-separated path (e.g. 'Parent/Child') or newFolderId." });
           }
-          moveProjects([item], folderMatches[0]);
+          destFolder = folderMatches[0];
+        }
+        if (destFolder) {
+          moveProjects([item], destFolder);
           changedProperties.push('folder');
         }
       }

@@ -9,6 +9,9 @@ All notable changes to omnifocus-mcp-plus are documented here.
 - **Invalid date strings were silently dropped.** `edit_item`, `add_omnifocus_task`, `add_project`, and `batch_add_items` all did `new Date(args.dueDate)` against user input with no validation. `new Date("tomorrow")` returns an `Invalid Date` object (NaN timestamp) and OmniFocus silently no-ops the assignment, so the caller got "✅ updated successfully" while nothing changed. New `optionalIsoDate` schema helper rejects unparseable strings at the schema boundary; empty strings still accepted as the "clear date" sentinel in edit contexts.
 - **`edit_item` with a typo'd `newFolderName` silently created a new folder.** The script previously did `destFolder = new Folder(args.newFolderName)` when lookup failed. `edit_item({newFolderName:"Wokr"})` would create a "Wokr" folder instead of erroring. Now errors with "Folder not found: ... Create it first with create_folder." Also handles ambiguous folder names with a clear error.
 
+### Added
+- **`edit_item.newFolderId` and slash-paths in `newFolderName`.** Two folders can legitimately share a name at different paths (e.g. `🦆Loon` top-level vs nested under `Personal Areas`; `Travel` top-level vs under `Someday/Maybe`). The ambiguity error above correctly refuses to guess but didn't give a good way to disambiguate. Now: pass `newFolderId` for an exact reference (use `list_folders` to find IDs), or use a slash-separated path in `newFolderName` like `Someday/Maybe/Travel`. Literal-name lookup still wins first, so folder names containing a literal `/` (like `📀Resources/Archives `) continue to work. `validateEditItemParams` rejects passing both `newFolderId` and `newFolderName` together.
+
 ## [0.3.2] - 2026-05-23
 
 ### Fixed

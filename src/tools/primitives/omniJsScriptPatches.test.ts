@@ -28,3 +28,17 @@ test('editItem primitive errors instead of auto-creating missing folders (Bug 3 
   assert.doesNotMatch(src, /destFolder = new Folder\(args\.newFolderName\)/, 'editItem still auto-creates missing folders');
   assert.match(src, /Folder not found:/, 'editItem missing folder-not-found error message');
 });
+
+test('editItem primitive supports newFolderId lookup (v0.3.3 follow-up)', () => {
+  const src = readPrimitive('editItem.ts');
+  assert.match(src, /args\.newFolderId/, 'editItem missing newFolderId reference');
+  assert.match(src, /primaryKey === args\.newFolderId/, 'editItem missing newFolderId lookup by primaryKey');
+  assert.match(src, /Folder not found with ID:/, 'editItem missing newFolderId not-found error message');
+});
+
+test('editItem primitive supports slash-path folder resolution (v0.3.3 follow-up)', () => {
+  const src = readPrimitive('editItem.ts');
+  assert.match(src, /newFolderName\.split\('\/'\)/, 'editItem missing path split on /');
+  assert.match(src, /newFolderName\.indexOf\('\/'\)/, 'editItem missing path-detection check on /');
+  assert.match(src, /f\.parent && f\.parent\.id\.primaryKey/, 'editItem missing parent-walk filter for path resolution');
+});
