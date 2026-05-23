@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import { addOmniFocusTask, AddOmniFocusTaskParams } from '../primitives/addOmniFocusTask.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { optionalIsoDate } from '../../utils/zodHelpers.js';
 
 export const schema = z.object({
   name: z.string().describe("The name of the task"),
   note: z.string().optional().describe("Additional notes for the task"),
-  dueDate: z.string().optional().describe("Due date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
-  deferDate: z.string().optional().describe("Defer date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
-  plannedDate: z.string().optional().describe("Planned date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
+  dueDate: optionalIsoDate("Due date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
+  deferDate: optionalIsoDate("Defer date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
+  plannedDate: optionalIsoDate("Planned date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
   flagged: z.boolean().optional().describe("Whether the task is flagged or not"),
   estimatedMinutes: z.number().optional().describe("Estimated time to complete the task, in minutes"),
   tags: z.array(z.string()).optional().describe("Tags to assign to the task"),

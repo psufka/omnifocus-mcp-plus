@@ -323,11 +323,14 @@ export async function editItem(params: EditItemParams): Promise<{
         }
 
         if (args.newFolderName !== undefined) {
-          let destFolder = flattenedFolders.filter(f => f.name === args.newFolderName)[0];
-          if (!destFolder) {
-            destFolder = new Folder(args.newFolderName);
+          const folderMatches = flattenedFolders.filter(f => f.name === args.newFolderName);
+          if (folderMatches.length === 0) {
+            return JSON.stringify({ success: false, error: 'Folder not found: ' + args.newFolderName + '. Create it first with create_folder.' });
           }
-          moveProjects([item], destFolder);
+          if (folderMatches.length > 1) {
+            return JSON.stringify({ success: false, error: 'Ambiguous folder name: ' + args.newFolderName + '. Multiple matches found.' });
+          }
+          moveProjects([item], folderMatches[0]);
           changedProperties.push('folder');
         }
       }

@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import { batchAddItems, BatchAddItemsParams } from '../primitives/batchAddItems.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { optionalIsoDate } from '../../utils/zodHelpers.js';
 
 const batchAddItemSchema = z.object({
   itemType: z.enum(['task', 'project']).optional().describe("Type of item to add ('task' or 'project'). Canonical field; legacy alias 'type' also accepted."),
   type: z.enum(['task', 'project']).optional().describe("[DEPRECATED] Alias for itemType. Prefer itemType."),
   name: z.string().describe("The name of the item"),
   note: z.string().optional().describe("Additional notes for the item"),
-  dueDate: z.string().optional().describe("The due date in ISO format (YYYY-MM-DD or full ISO date)"),
-  deferDate: z.string().optional().describe("The defer date in ISO format (YYYY-MM-DD or full ISO date)"),
-  plannedDate: z.string().optional().describe("The planned date in ISO format (YYYY-MM-DD or full ISO date)"),
+  dueDate: optionalIsoDate("The due date in ISO format (YYYY-MM-DD or full ISO date)"),
+  deferDate: optionalIsoDate("The defer date in ISO format (YYYY-MM-DD or full ISO date)"),
+  plannedDate: optionalIsoDate("The planned date in ISO format (YYYY-MM-DD or full ISO date)"),
   flagged: z.boolean().optional().describe("Whether the item is flagged or not"),
   estimatedMinutes: z.number().optional().describe("Estimated time to complete the item, in minutes"),
   tags: z.array(z.string()).optional().describe("Tags to assign to the item"),

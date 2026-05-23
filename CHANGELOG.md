@@ -2,6 +2,13 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.3.3] - 2026-05-23
+
+### Fixed
+- **`get_task_by_id` silently returned the wrong task on ambiguous names.** Every other name-fallback tool (`edit_item`, `remove_item`, `list_subtasks`, `duplicate_task`, `reorder_task`) errors when multiple items share a name; `get_task_by_id` did not — it returned the first match. Now errors with a clear "Ambiguous task name" message pointing to `taskId`.
+- **Invalid date strings were silently dropped.** `edit_item`, `add_omnifocus_task`, `add_project`, and `batch_add_items` all did `new Date(args.dueDate)` against user input with no validation. `new Date("tomorrow")` returns an `Invalid Date` object (NaN timestamp) and OmniFocus silently no-ops the assignment, so the caller got "✅ updated successfully" while nothing changed. New `optionalIsoDate` schema helper rejects unparseable strings at the schema boundary; empty strings still accepted as the "clear date" sentinel in edit contexts.
+- **`edit_item` with a typo'd `newFolderName` silently created a new folder.** The script previously did `destFolder = new Folder(args.newFolderName)` when lookup failed. `edit_item({newFolderName:"Wokr"})` would create a "Wokr" folder instead of erroring. Now errors with "Folder not found: ... Create it first with create_folder." Also handles ambiguous folder names with a clear error.
+
 ## [0.3.2] - 2026-05-23
 
 ### Fixed

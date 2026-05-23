@@ -45,7 +45,7 @@ import * as reorderTaskTool from './tools/definitions/reorderTask.js';
 // Create an MCP server
 const server = new McpServer({
   name: "OmniFocus MCP Plus",
-  version: "0.3.2"
+  version: "0.3.3"
 });
 
 // Register tools

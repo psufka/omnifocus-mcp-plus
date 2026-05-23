@@ -36,7 +36,11 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
     if (args.taskId) {
       task = flattenedTasks.filter(t => t.id.primaryKey === args.taskId)[0];
     } else {
-      task = flattenedTasks.filter(t => t.name === args.taskName)[0];
+      const matches = flattenedTasks.filter(t => t.name === args.taskName);
+      if (matches.length > 1) {
+        return JSON.stringify({ success: false, error: 'Ambiguous task name: ' + args.taskName + '. Multiple matches found; please use taskId.' });
+      }
+      task = matches[0];
     }
     if (!task) return JSON.stringify({ success: false, error: 'Task not found' });
 
