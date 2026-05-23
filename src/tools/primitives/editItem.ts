@@ -379,7 +379,11 @@ export async function editItem(params: EditItemParams): Promise<{
           destFolder = folderMatches[0];
         }
         if (destFolder) {
-          moveProjects([item], destFolder);
+          // OmniJS Project.parentFolder is a writable property; there is no
+          // global moveProjects() in OF's Omni Automation API. (v0.3.0's
+          // AppleScript→OmniJS migration left a stale moveProjects() call
+          // here that nothing ever exercised end-to-end.)
+          item.parentFolder = destFolder;
           changedProperties.push('folder');
         }
       }
