@@ -6,7 +6,7 @@ import { PerspectiveDisplayMode } from '../primitives/perspectiveTaskTree.js';
 export const schema = z.object({
   perspectiveName: z.string().describe("Exact name of the OmniFocus custom perspective (e.g., 'Today', 'Weekly Review', 'This Week'). This is NOT a tag name."),
   hideCompleted: z.boolean().optional().describe("Whether to hide completed tasks. Set to false to show all tasks including completed ones (default: true)"),
-  limit: z.number().optional().describe("Maximum number of tasks to return in flat view mode (default: 1000, ignored in hierarchy mode)"),
+  limit: z.number().optional().describe("Maximum number of tasks to return in any display mode, including the tree modes (default: 1000). When tasks are truncated the output says '(showing N of M tasks)'."),
   displayMode: z.enum(['project_tree', 'task_tree', 'flat']).optional().describe("Display mode for perspective tasks: project_tree (group by project + task hierarchy), task_tree (global task hierarchy), or flat (simple list). Default: project_tree"),
   showHierarchy: z.boolean().optional().describe("Display tasks in hierarchical tree structure showing parent-child relationships. Use this when user wants 'hierarchy view' or 'tree view' (default: false)"),
   groupByProject: z.boolean().optional().describe("Legacy parameter. Group tasks by project when displayMode is not provided. Default: true")
@@ -28,7 +28,7 @@ export function resolveCustomPerspectiveDisplayMode(args: Partial<z.infer<typeof
   return 'project_tree';
 }
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await getCustomPerspectiveTasks({
       perspectiveName: args.perspectiveName,

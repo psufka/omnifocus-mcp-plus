@@ -28,7 +28,7 @@ function formatDestination(args: z.infer<typeof schema>): string {
   return 'destination';
 }
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await moveTask(args as MoveTaskParams);
 

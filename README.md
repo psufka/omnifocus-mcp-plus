@@ -211,49 +211,7 @@ All tools use **OmniJS via JXA** — inline JavaScript executed inside OmniFocus
 
 ## Changelog
 
-### v0.3.1
-
-- **`reorder_task`** (41 total) — move tasks before/after siblings or to beginning/ending of container
-
-### v0.3.0
-
-- **6 new tools** (40 total): `list_subtasks`, `duplicate_task`, `batch_move_tasks`, `list_notifications`, `add_notification`, `remove_notification`
-- **Tag AND filter** — `tagMatchMode: "all"` on `filter_tasks` requires all specified tags
-- **Effective dates** — `effectiveDueDate`/`effectiveDeferDate` in all query results (inherited from parent)
-- **AppleScript → OmniJS migration** — `addOmniFocusTask`, `addProject`, `editItem`, `removeItem` rewritten. Fixes special character crashes, timezone issues, and enables task move
-
-### v0.2.2
-
-- **Fix OmniJS scripts ignoring parameters** — `forecastTasks`, `flaggedTasks`, `inboxTasks` now read `injectedArgs` instead of hardcoding defaults
-- **Fix `get_task_counts` deferred count** — counts future defer dates instead of blocked status
-- **Fix tag replacement iteration bug** — reverse iteration prevents skipped elements
-- **Fix JSON escaping in AppleScript returns** — task names with `"` or `\` no longer break JSON
-- **Fix `executeJXA` temp file leak** — cleanup now in `finally` block
-- **Remove unimplemented `filter_tasks` params** — `hasEstimate`, `estimateMin`, `estimateMax`, `hasNote`, `inInbox`
-- **Raise perspective engine limits** — 50/15 → 500/200
-
-### v0.2.0
-
-- **17 new tools** using OmniJS: append_to_note, uncomplete_task, set_task_repetition, list_projects, search_projects, get_project_counts, get_task_counts, folder CRUD (5 tools), tag CRUD (5 tools)
-- **New `runOmniJs()` helper** — simplified inline OmniJS execution with JSON arg injection, no external script files needed
-- **Renamed** from omnifocus-mcp-enhanced-fork to omnifocus-mcp-plus
-
-### v0.1.0
-
-Fork of jqlts1/omnifocus-mcp-enhanced with:
-- Fix task completion for inbox and repeating tasks
-- Fix all due-date filters being silently ignored
-- Fix dateFormatter discarding time components
-- Fix multiline notes breaking AppleScript
-- Fix JSON escaping in AppleScript return strings
-- Fix single-quote escaping inserting unwanted backslashes
-- Fix `isDateInCurrentWeek` using Monday-start weeks
-- Display task IDs in all output tools
-- Duplicate-name protection on `removeItem`
-- Require full ISO 8601 dates with timezone
-- Move task to project/parent/inbox support
-- All Chinese comments translated to English
-- Test suite wired up (8 unit tests via tsx)
+Current version: 0.4.0. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Known Limitations
 

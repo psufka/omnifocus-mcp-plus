@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import { addOmniFocusTask, AddOmniFocusTaskParams } from '../primitives/addOmniFocusTask.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import { optionalIsoDate } from '../../utils/zodHelpers.js';
+import { isoDateDescription, optionalIsoDate } from '../../utils/zodHelpers.js';
+import { parseLocalDate } from '../../utils/localDate.js';
 
 export const schema = z.object({
   name: z.string().describe("The name of the task"),
   note: z.string().optional().describe("Additional notes for the task"),
-  dueDate: optionalIsoDate("Due date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
-  deferDate: optionalIsoDate("Defer date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
-  plannedDate: optionalIsoDate("Planned date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day."),
+  dueDate: optionalIsoDate(isoDateDescription("The due date")),
+  deferDate: optionalIsoDate(isoDateDescription("The defer date")),
+  plannedDate: optionalIsoDate(isoDateDescription("The planned date")),
   flagged: z.boolean().optional().describe("Whether the task is flagged or not"),
   estimatedMinutes: z.number().optional().describe("Estimated time to complete the task, in minutes"),
   tags: z.array(z.string()).optional().describe("Tags to assign to the task"),
@@ -17,7 +18,7 @@ export const schema = z.object({
   parentTaskName: z.string().optional().describe("The name of the parent task to create this task as a subtask (alternative to parentTaskId)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     // Call the addOmniFocusTask function
     const result = await addOmniFocusTask(args as AddOmniFocusTaskParams);
@@ -38,18 +39,26 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
         ? ` with tags: ${args.tags.join(', ')}`
         : "";
 
-      let dueDateText = args.dueDate
-        ? ` due on ${new Date(args.dueDate).toLocaleDateString()}`
-        : "";
+      // parseLocalDate so a bare YYYY-MM-DD reads back as that calendar day
+      // (plain `new Date('2026-03-05')` is UTC midnight = the previous evening here).
+      const due = args.dueDate ? parseLocalDate(args.dueDate) : null;
+      let dueDateText = due ? ` due on ${due.toLocaleDateString()}` : "";
 
-      let plannedDateText = args.plannedDate
-        ? ` planned for ${new Date(args.plannedDate).toLocaleDateString()}`
-        : "";
+      const planned = args.plannedDate ? parseLocalDate(args.plannedDate) : null;
+      let plannedDateText = planned ? ` planned for ${planned.toLocaleDateString()}` : "";
+
+      let text = `✅ Task "${args.name}" created successfully ${locationText}${dueDateText}${plannedDateText}${tagText}.`;
+
+      // Non-fatal problems (e.g. plannedDate unsupported by this OmniFocus
+      // build) used to be swallowed by a silent catch in the script.
+      if (result.warnings && result.warnings.length > 0) {
+        text += `\n\n${result.warnings.map(w => `⚠️ ${w}`).join('\n')}`;
+      }
 
       return {
         content: [{
           type: "text" as const,
-          text: `✅ Task "${args.name}" created successfully ${locationText}${dueDateText}${plannedDateText}${tagText}.`
+          text
         }]
       };
     } else {

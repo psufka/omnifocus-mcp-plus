@@ -13,10 +13,6 @@ export async function getInboxTasks(options: GetInboxTasksOptions = {}): Promise
       hideCompleted: hideCompleted
     });
 
-    if (typeof result === 'string') {
-      return result;
-    }
-
     // If result is an object, format it
     if (result && typeof result === 'object') {
       const data = result as any;
@@ -36,12 +32,18 @@ export async function getInboxTasks(options: GetInboxTasksOptions = {}): Promise
 
           data.tasks.forEach((task: any, index: number) => {
             const flagSymbol = task.flagged ? '🚩 ' : '';
-            const dueDateStr = task.dueDate ? ` [DUE: ${new Date(task.dueDate).toLocaleDateString()}]` : '';
+            // Fall back to inherited dates with an '(eff)' marker, matching filter_tasks
+            const dueDateStr = task.dueDate
+              ? ` [DUE: ${new Date(task.dueDate).toLocaleDateString()}]`
+              : (task.effectiveDueDate ? ` [DUE (eff): ${new Date(task.effectiveDueDate).toLocaleDateString()}]` : '');
+            const deferDateStr = task.deferDate
+              ? ` [DEFER: ${new Date(task.deferDate).toLocaleDateString()}]`
+              : (task.effectiveDeferDate ? ` [DEFER (eff): ${new Date(task.effectiveDeferDate).toLocaleDateString()}]` : '');
             const plannedDateStr = task.plannedDate ? ` [PLAN: ${new Date(task.plannedDate).toLocaleDateString()}]` : '';
             const statusStr = task.taskStatus !== 'Available' ? ` (${task.taskStatus})` : '';
             const idStr = task.id ? ` [${task.id}]` : '';
 
-            output += `${index + 1}. ${flagSymbol}${task.name}${idStr}${dueDateStr}${plannedDateStr}${statusStr}\n`;
+            output += `${index + 1}. ${flagSymbol}${task.name}${idStr}${dueDateStr}${deferDateStr}${plannedDateStr}${statusStr}\n`;
 
             if (task.note && task.note.trim()) {
               output += `   📝 ${task.note.trim()}\n`;

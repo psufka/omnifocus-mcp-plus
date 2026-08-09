@@ -9,7 +9,7 @@ export const listTagsSchema = z.object({
   limit: z.number().min(1).max(500).optional().describe("Maximum number of tags to return (default: 100)")
 }).strict();
 
-export async function listTagsHandler(args: z.infer<typeof listTagsSchema>, extra: RequestHandlerExtra) {
+export async function listTagsHandler(args: z.infer<typeof listTagsSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await listTags(args);
     if (result.success) {
@@ -27,7 +27,7 @@ export const searchTagsSchema = z.object({
   limit: z.number().min(1).max(200).optional().describe("Maximum number of results (default: 50)")
 }).strict();
 
-export async function searchTagsHandler(args: z.infer<typeof searchTagsSchema>, extra: RequestHandlerExtra) {
+export async function searchTagsHandler(args: z.infer<typeof searchTagsSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await searchTags(args);
     if (result.success) {
@@ -45,7 +45,7 @@ export const createTagSchema = z.object({
   parent: z.string().optional().describe("Parent tag name or ID (creates at top level if omitted)")
 }).strict();
 
-export async function createTagHandler(args: z.infer<typeof createTagSchema>, extra: RequestHandlerExtra) {
+export async function createTagHandler(args: z.infer<typeof createTagSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await createTag(args);
     if (result.success) {
@@ -64,7 +64,7 @@ export const updateTagSchema = z.object({
   status: z.enum(['active', 'on_hold', 'dropped']).optional().describe("New status for the tag")
 }).strict();
 
-export async function updateTagHandler(args: z.infer<typeof updateTagSchema>, extra: RequestHandlerExtra) {
+export async function updateTagHandler(args: z.infer<typeof updateTagSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await updateTag(args);
     if (result.success) {
@@ -81,7 +81,7 @@ export const deleteTagSchema = z.object({
   name_or_id: z.string().describe("Tag name or ID to delete")
 }).strict();
 
-export async function deleteTagHandler(args: z.infer<typeof deleteTagSchema>, extra: RequestHandlerExtra) {
+export async function deleteTagHandler(args: z.infer<typeof deleteTagSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await deleteTag(args);
     if (result.success) {

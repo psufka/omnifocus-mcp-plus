@@ -1,8 +1,10 @@
 import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
 import {
   buildPerspectiveTaskTree,
+  isPerspectiveTaskVisible,
   PerspectiveDisplayMode,
   PerspectiveProjectGroup,
+  PerspectiveTaskInput,
   PerspectiveTaskNode
 } from './perspectiveTaskTree.js';
 
@@ -38,8 +40,18 @@ export async function getCustomPerspectiveTasks(options: GetCustomPerspectiveTas
       throw new Error(data.error || 'Unknown error occurred');
     }
 
-    const allTasks = Object.values(data.taskMap || {}) as any[];
-    const tree = buildPerspectiveTaskTree(allTasks, {
+    const allTasks = Object.values(data.taskMap || {}) as PerspectiveTaskInput[];
+
+    // Apply the limit to the tasks that would actually be rendered, before the
+    // tree is built — otherwise tree modes silently return everything.
+    const visibleTasks = allTasks.filter((task) => isPerspectiveTaskVisible(task, hideCompleted));
+    const matchedCount = visibleTasks.length;
+    const limitedTasks = limit > 0 ? visibleTasks.slice(0, limit) : visibleTasks;
+    const truncationNote = limitedTasks.length < matchedCount
+      ? `(showing ${limitedTasks.length} of ${matchedCount} tasks)`
+      : '';
+
+    const tree = buildPerspectiveTaskTree(limitedTasks, {
       hideCompleted,
       inboxLabel: 'Inbox'
     });
@@ -48,15 +60,17 @@ export async function getCustomPerspectiveTasks(options: GetCustomPerspectiveTas
       return `**Perspective Tasks: ${perspectiveName}**\n\nNo ${hideCompleted ? 'incomplete ' : ''}tasks found.`;
     }
 
+    const totalCount = data.count || matchedCount;
+
     if (displayMode === 'task_tree') {
-      return formatTaskTree(perspectiveName, tree.rootTasks, tree.flatTasks.length, data.count || tree.flatTasks.length);
+      return formatTaskTree(perspectiveName, tree.rootTasks, tree.flatTasks.length, totalCount, truncationNote);
     }
 
     if (displayMode === 'flat') {
-      return formatFlatTasks(perspectiveName, tree.flatTasks, limit, data.count || tree.flatTasks.length);
+      return formatFlatTasks(perspectiveName, tree.flatTasks, matchedCount, totalCount, truncationNote);
     }
 
-    return formatProjectTree(perspectiveName, tree.projectGroups, tree.flatTasks.length, data.count || tree.flatTasks.length);
+    return formatProjectTree(perspectiveName, tree.projectGroups, tree.flatTasks.length, totalCount, truncationNote);
   } catch (error) {
     console.error('Error in getCustomPerspectiveTasks:', error);
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
@@ -83,12 +97,13 @@ function formatProjectTree(
   perspectiveName: string,
   groups: PerspectiveProjectGroup[],
   visibleCount: number,
-  totalCount: number
+  totalCount: number,
+  truncationNote: string
 ): string {
   const lines: string[] = [];
   lines.push(`## Perspective Tasks: ${perspectiveName}`);
   lines.push('');
-  lines.push(`**Mode: Project Tree** · ${visibleCount} visible tasks`);
+  lines.push(`**Mode: Project Tree** · ${visibleCount} visible tasks${truncationNote ? ` ${truncationNote}` : ''}`);
 
   groups.forEach((group) => {
     const heading = group.projectName === 'Inbox' ? '### 📥 Inbox' : `### 📁 ${group.projectName}`;
@@ -110,12 +125,13 @@ function formatTaskTree(
   perspectiveName: string,
   rootTasks: PerspectiveTaskNode[],
   visibleCount: number,
-  totalCount: number
+  totalCount: number,
+  truncationNote: string
 ): string {
   const lines: string[] = [];
   lines.push(`## Perspective Tasks: ${perspectiveName}`);
   lines.push('');
-  lines.push(`**Mode: Task Tree** · ${visibleCount} visible tasks`);
+  lines.push(`**Mode: Task Tree** · ${visibleCount} visible tasks${truncationNote ? ` ${truncationNote}` : ''}`);
   lines.push('');
   renderTaskNodes(rootTasks, lines, '', true);
 
@@ -130,15 +146,17 @@ function formatTaskTree(
 function formatFlatTasks(
   perspectiveName: string,
   tasks: PerspectiveTaskNode[],
-  limit: number,
-  totalCount: number
+  matchedCount: number,
+  totalCount: number,
+  truncationNote: string
 ): string {
-  const displayTasks = limit > 0 ? tasks.slice(0, limit) : tasks;
+  // The limit is already applied upstream, before the tree was built.
+  const displayTasks = tasks;
 
   const lines: string[] = [];
   lines.push(`## Perspective Tasks: ${perspectiveName}`);
   lines.push('');
-  lines.push(`**Mode: Flat List** · Showing ${displayTasks.length} / ${tasks.length}`);
+  lines.push(`**Mode: Flat List**${truncationNote ? ` ${truncationNote}` : ` · ${displayTasks.length} tasks`}`);
   lines.push('');
 
   displayTasks.forEach((task, index) => {

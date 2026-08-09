@@ -2,6 +2,53 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.4.0] - 2026-08-09
+
+Full-codebase audit release: three independent reviews (query tools, mutation tools, infrastructure) surfaced 40 issues; all were fixed. 42 tools, no tool names changed.
+
+### Fixed — silent wrong behavior
+- **`set_task_repetition` "from_completion" silently created a FIXED repetition.** `Task.RepetitionMethod.DueAfterCompletion` does not exist in OmniJS (verified live: members are None/Fixed/DeferUntilDate/DueDate), and `new Task.RepetitionRule(rule, undefined)` silently falls back to Fixed — so "repeat 3 days after completion" chores repeated on a fixed calendar schedule. Now maps to `DueDate` ("Due Again"), with new `defer_from_completion` → `DeferUntilDate` ("Defer Another"). Regression test pins the mapping.
+- **Deleting a tag/folder by name destroyed an arbitrary match.** All `name_or_id` lookups in tag/folder tools took `filter(...)[0]` with no ambiguity check — two folders named "Archive" meant `delete_folder` cascade-deleted whichever came first. All lookups now go through a shared resolver that errors on ambiguity, listing the matches with IDs.
+- **A stale ID silently fell back to name lookup in `remove_item`/`edit_item`.** A provided ID that matched nothing degraded to name matching, so a stale ID + a name matching a different task deleted/edited the wrong item with a ✅ message. An explicit ID that misses is now an error and the name is never tried.
+- **`filter_tasks` `completedThisWeek`/`completedThisMonth` returned all-time completions.** The flags selected completed tasks but never applied a date range (first N of all time, alphabetical), while the summary printed "Completed: This Week". Both ranges now implemented (Monday-anchored week; 1st-of-month).
+- **`dump_database` `hideCompleted:false` and `hideRecurringDuplicates` were no-ops.** The script hard-filtered to active tasks before the options could apply. `hideCompleted:false` now really includes completed/dropped tasks (capped at the 50 most recent per project, cap noted in output); `hideRecurringDuplicates` now collapses completed instances of repeating tasks with an `(×N completed instances)` marker.
+- **Bare `YYYY-MM-DD` dates landed on the wrong day.** `new Date("2026-08-12")` is UTC midnight — Aug 11, 7:00 PM in US Central — in both Node and OmniJS. Every tool now normalizes bare dates to local midnight via a shared helper (`src/utils/localDate.ts`), and all schema descriptions agree the bare form is safe (previously `batch_add_items` recommended the format `add_omnifocus_task` warned against).
+- **`edit_item` half-applied project edits.** Property writes ran before folder resolution, so a bad `newFolderName` renamed the project and then errored. All destination lookups (project, parent task, folder) now resolve and validate before any write.
+- **Batch tools reported `Failed to process batch operation: undefined`.** When every item failed, per-item errors were discarded. Handlers now render per-item ✅/❌ lines in partial and all-failed cases.
+- **`get_custom_perspective_tasks` hijacked the OmniFocus window.** A read tool switched the front window to the queried perspective and never restored it (and threw opaquely with no window open). The previous perspective is saved and restored in a finally block; the no-window case errors clearly. `limit` also now applies in the tree display modes (previously flat-only), with a "(showing N of M)" note.
+- **`get_forecast_tasks` `includeDeferredOnly` was a no-op** — the due-date branch ran unconditionally. Also fixed the days+1 off-by-one (days=7 now means today through today+6, documented), and TOMORROW headers on daylight-saving transition days.
+- **`get_task_counts` disagreed with OmniFocus.** `available` excluded Next/DueSoon/Overdue (all actionable); `dueSoon` used a hardcoded 3-day window instead of `Task.Status.DueSoon` (which respects the user's Due Soon setting). Both now match app semantics.
+- **`reorder_task` could silently move a task to another project** when the before/after reference wasn't actually a sibling — siblingship is now verified.
+- **`duplicate_task` was a shallow copy** dropping repetition rules, subtasks, and notifications. Now uses the native `duplicateTasks()` API (verified signature live) — full deep copy; the result reports subtask/repetition/notification carryover.
+- **`edit_item` silently ignored schema-legal fields that didn't match the itemType** (e.g. `addTags` on a project → "✅ updated" with nothing changed). Wrong-type fields are now rejected with pointers to the right field — and tags on projects are actually supported now (the OmniJS Project API takes the same tag calls as tasks).
+- **`replaceTags: []` was a silent no-op** — an empty array now clears all tags via `clearTags()`; omitting the field still means "no change".
+- **Dropping a repeating task killed all occurrences.** `item.drop(true)` was hardcoded; new `dropAllOccurrences` flag defaults to false (current occurrence only). Also fixed: `Project` has no `drop()` method at all — the old project-dropped branch would have thrown; it now sets `Project.Status.Dropped`.
+- **`planned date` failures were swallowed** by empty catch blocks in four tools while reporting success — now surfaced as ⚠️ warnings.
+- **`complete_task`/`uncomplete_task` were non-idempotent** — completing an already-completed task errored (bad for retries); both now return success with an "already" note. Also fixed a latent `task.taskStatus.name` (undefined in OmniJS) in uncomplete's status message.
+- **Notification tool gaps**: absolute `date` accepted any string ("tomorrow" → Invalid Date deep in OmniJS; now schema-validated), negative `minutesBefore` allowed (now min 0), relative notifications on tasks with no due date now error clearly, and `remove_notification` returns the remaining list so stale indices are visible.
+- **`get_task_by_id` couldn't show Dropped** — dropped tasks looked Available. Now returns `taskStatus` + `dropped`.
+- **`filter_tasks` truncated before filtering on large databases** — the script sorted by name and capped at max(limit×20, 1000) before date/tag filters ran, silently dropping late-alphabet matches. All filters (and the sort) now run in-script before truncation; output warns when results are capped. Name sort now uses localeCompare (was case-sensitive raw comparison).
+
+### Fixed — infrastructure
+- **MCP stdio protocol pollution**: `list_custom_perspectives` wrote six console.log lines to stdout — the JSON-RPC channel — on every call. All server-side diagnostics now go to stderr (console.log inside the OmniJS scripts runs in OmniFocus's runtime and never touched stdio).
+- **osascript calls could hang forever** (OmniFocus modal/permission dialog) and died at 1MB of output (`exec` default maxBuffer, fatal for `dump_database` on large databases). All calls now run with a 120s timeout and 50MB buffer, with actionable error messages for both failure modes.
+- **Temp-file race**: script temp files used millisecond timestamps — two concurrent tool calls in the same millisecond could swap results. Names now use randomUUID.
+- **`String.replace` injection**: user args reached the replacement-string position of `String.replace`, where `$'`-style sequences splice file content — a search text containing `$'` corrupted the generated script (proven with a live repro). Replacement is now a function.
+- **Unparseable script output produced `Error: undefined`** — `runOmniJs` returned a raw string on JSON parse failure that callers read `.success` off. Now returns a structured error including the raw output excerpt, which tool errors surface.
+- **Temp-file leak** on the error path of `executeOmniFocusScript` (cleanup now in finally, matching the v0.2.2 fix that missed this function).
+- **Batch performance**: batch tools ran one osascript round-trip per item (50 items = 50 sequential OmniFocus launches). Each batch is now a single generated script with per-item try/catch — same per-item error reporting, one round-trip. `dump_database`'s compact report also dropped its O(n²) per-project/per-parent scans (precomputed maps; tag-prefix computation now O(n log n), verified byte-identical over 20k randomized inputs).
+
+### Changed
+- **MCP SDK 1.8.0 → 1.30.0** (clears the DNS-rebinding/ReDoS advisories in ≤1.25.1; `npm audit` now clean). `registerStrictTool` no longer reaches into SDK private internals — the strict schemas go through the official `registerTool()` API, with refine/transform schemas re-validated in a handler wrapper so tools/list still advertises full JSON Schemas. Verified end-to-end with in-memory client/server round-trip tests.
+- **Forecast now honors inherited (effective) dates** — tasks inheriting a due date from their project/parent appear in `get_forecast_tasks`, matching OmniFocus's own Forecast perspective, and all read tools (`flagged`/`inbox`/`by_tag`/`forecast`) render effective dates with the same `(eff)` marker `filter_tasks` already used.
+- **Packaging**: version 0.4.0; author/description/keywords updated (fork residue removed); broken `bin` entry removed; `files` allowlist added; MIT LICENSE file added; tsx pinned in devDependencies (was fetched unpinned at test time); `tsconfig` moved to nodenext resolution; test files no longer compile into dist (tsconfig.build.json); logo compressed 1.97MB → 447KB; README's stale embedded changelog now points here.
+
+### Removed
+- **Dead code**: `perspectiveEngine.ts` (682 lines — unregistered, and the only injection-unsafe string interpolation in the repo), the unreachable `get_perspective_tasks_v2` tool, `dateFormatter.ts`, `executeAppleScript`/`executeJXA`, the legacy regex-patch block in `scriptExecution.ts`, 7 unreferenced debug scripts in `omnifocusScripts/`, and `filter_tasks`' dead `perspective:'custom'` options.
+
+### Internal
+- Shared OmniJS lookup helpers (`src/utils/omniJsHelpers.ts`) — single implementation of strict ID/name resolution used by every mutation tool. Shared local-date helpers (`src/utils/localDate.ts`). Test suite: 106 → 266 tests, including scriptExecution coverage (escaping round-trips, injection regression, temp-name uniqueness) and generated-script syntax checks.
+
 ## [0.3.3] - 2026-05-23
 
 ### Fixed

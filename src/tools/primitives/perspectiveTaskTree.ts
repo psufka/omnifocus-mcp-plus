@@ -144,6 +144,15 @@ function isHiddenTask(task: PerspectiveTaskInput, hideCompleted: boolean): boole
   return hideCompleted && (Boolean(task.completed) || Boolean(task.dropped));
 }
 
+/**
+ * Same visibility rule buildPerspectiveTaskTree applies internally. Exported so
+ * callers can apply a limit to the tasks that will actually be rendered before
+ * the tree is built (otherwise a limit would count tasks the tree drops).
+ */
+export function isPerspectiveTaskVisible(task: PerspectiveTaskInput, hideCompleted: boolean): boolean {
+  return !isHiddenTask(task, hideCompleted);
+}
+
 function resolveProjectName(task: PerspectiveTaskInput): string | null {
   const projectName = task.projectName ?? task.project ?? null;
   if (!projectName) {

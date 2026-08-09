@@ -1,22 +1,26 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { z } from "zod";
 
-type Handler = (args: any, extra: RequestHandlerExtra) => any;
+type Handler = (args: any, extra: any) => any;
 
-function getShape(schema: z.ZodTypeAny): z.ZodRawShape {
-  if (schema instanceof z.ZodObject) return schema.shape;
+function unwrapToObject(schema: z.ZodTypeAny): z.ZodObject<z.ZodRawShape> {
+  if (schema instanceof z.ZodObject) return schema as z.ZodObject<z.ZodRawShape>;
   const def: any = (schema as any)._def;
-  if (def?.schema) return getShape(def.schema);
+  if (def?.schema) return unwrapToObject(def.schema);
   throw new Error("registerStrictTool: schema is not a ZodObject (and not a wrapped one)");
 }
 
-// Wraps server.tool() to enforce strict input validation across the MCP boundary.
+// Registers a tool whose input schema rejects unknown fields.
 //
-// The SDK reconstructs schemas via `z.object(shape)` at registration time, which
-// drops any `.strict()` chained on the exported schema. After the SDK builds its
-// loose copy we overwrite `inputSchema` with the original strict schema; the SDK's
-// safeParseAsync (mcp.js:66) then rejects unknown fields with a clear error.
+// The strict object schema is passed to the official registerTool() API — the
+// SDK (>=1.30) preserves full object schemas for both validation and tools/list
+// serialization, so unknown fields fail with a clear error and clients see the
+// real JSON Schema (with additionalProperties: false).
+//
+// Refine/transform wrappers (ZodEffects) can't serialize to JSON Schema, so the
+// unwrapped strict object is registered and the full schema re-runs in a
+// handler wrapper: cross-field refinements still reject, transforms still reach
+// the handler, and tools/list still shows the complete field list.
 export function registerStrictTool(
   server: McpServer,
   name: string,
@@ -24,10 +28,34 @@ export function registerStrictTool(
   schema: z.ZodTypeAny,
   handler: Handler
 ): void {
-  server.tool(name, description, getShape(schema), handler);
-  const registered = (server as any)._registeredTools?.[name];
-  if (!registered) {
-    throw new Error(`registerStrictTool: tool ${name} was not registered by the SDK`);
-  }
-  registered.inputSchema = schema;
+  const objectSchema = unwrapToObject(schema);
+  const strictObject = objectSchema.strict();
+  const needsFullParse = schema !== objectSchema;
+
+  const callback = needsFullParse
+    ? async (args: any, extra: any) => {
+        const parsed = await schema.safeParseAsync(args);
+        if (!parsed.success) {
+          const message = parsed.error.issues
+            .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
+            .join("; ");
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Input validation error for tool ${name}: ${message}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        return handler(parsed.data, extra);
+      }
+    : handler;
+
+  server.registerTool(
+    name,
+    { description, inputSchema: strictObject as any },
+    callback as any
+  );
 }

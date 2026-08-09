@@ -6,7 +6,7 @@ export const schema = z.object({
   hideCompleted: z.boolean().optional().describe("Set to false to show completed tasks in inbox (default: true)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await getInboxTasks({
       hideCompleted: args.hideCompleted !== false // Default to true

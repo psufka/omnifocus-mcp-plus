@@ -2,10 +2,12 @@
 (() => {
   try {
     // Parameters will be injected by the script execution system
-    const tagName = injectedArgs ? injectedArgs.tagName : "coding"; // Default for testing
-    const hideCompleted = injectedArgs ? injectedArgs.hideCompleted : true; // Default to true
-    const exactMatch = injectedArgs ? injectedArgs.exactMatch : false;
-    
+    const args = typeof injectedArgs !== 'undefined' && injectedArgs ? injectedArgs : {};
+    const tagName = args.tagName !== undefined ? args.tagName : null;
+    // `args.x ? :` would treat an omitted key as false — check for undefined
+    const hideCompleted = args.hideCompleted !== undefined ? args.hideCompleted : true;
+    const exactMatch = args.exactMatch !== undefined ? args.exactMatch : false;
+
     if (!tagName) {
       return JSON.stringify({
         success: false,
@@ -71,14 +73,19 @@
     
     // Get all tasks that have any of the matching tags
     let matchingTasks = [];
-    
+    // Set of ids seen so far — a per-task linear scan of matchingTasks made
+    // this O(n²) on large tag sets
+    const seenTaskIds = new Set();
+
     matchingTags.forEach(tag => {
       const tasksWithTag = tag.tasks;
       console.log(`Tag "${tag.name}" has ${tasksWithTag.length} tasks`);
-      
+
       tasksWithTag.forEach(task => {
         // Avoid duplicates (a task might have multiple matching tags)
-        if (!matchingTasks.find(t => t.id.primaryKey === task.id.primaryKey)) {
+        const taskId = task.id.primaryKey;
+        if (!seenTaskIds.has(taskId)) {
+          seenTaskIds.add(taskId);
           matchingTasks.push(task);
         }
       });

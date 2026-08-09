@@ -45,7 +45,7 @@ import * as reorderTaskTool from './tools/definitions/reorderTask.js';
 // Create an MCP server
 const server = new McpServer({
   name: "OmniFocus MCP Plus",
-  version: "0.3.3"
+  version: "0.4.0"
 });
 
 // Register tools
@@ -190,7 +190,7 @@ registerStrictTool(server,
 
 registerStrictTool(server,
   "complete_task",
-  "Mark a task as completed (mirror of uncomplete_task). Errors if the task is already completed.",
+  "Mark a task as completed (mirror of uncomplete_task). Idempotent: completing an already-completed task succeeds with a note.",
   completeTaskTool.schema,
   completeTaskTool.handler
 );

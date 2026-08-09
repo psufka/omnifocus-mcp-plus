@@ -1,4 +1,5 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 
 export async function listTags(params: { status?: string; sortBy?: string; limit?: number } = {}): Promise<any> {
   const script = `
@@ -73,15 +74,14 @@ export async function searchTags(params: { query: string; limit?: number }): Pro
 
 export async function createTag(params: { name: string; parent?: string }): Promise<any> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
     let location = tags.ending;
 
     if (args.parent) {
       const allTags = flattenedTags.filter(() => true);
-      const lower = args.parent.toLowerCase();
-      const parentTag = allTags.filter(t => t.id.primaryKey === args.parent)[0] ||
-                        allTags.filter(t => t.name.toLowerCase() === lower)[0];
-      if (!parentTag) return JSON.stringify({ success: false, error: 'Parent tag not found: ' + args.parent });
-      location = parentTag.ending;
+      const resolved = __resolveByNameOrId(allTags, args.parent, 'Parent tag');
+      if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+      location = resolved.item.ending;
     }
 
     const tag = new Tag(args.name, location);
@@ -96,6 +96,7 @@ export async function createTag(params: { name: string; parent?: string }): Prom
 
 export async function updateTag(params: { name_or_id: string; name?: string; status?: string }): Promise<any> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
     const statusMap = {
       'active': Tag.Status.Active,
       'on_hold': Tag.Status.OnHold,
@@ -107,12 +108,9 @@ export async function updateTag(params: { name_or_id: string; name?: string; sta
     statusNameMap[Tag.Status.Dropped] = 'dropped';
 
     const allTags = flattenedTags.filter(() => true);
-    let tag = allTags.filter(t => t.id.primaryKey === args.name_or_id)[0];
-    if (!tag) {
-      const lower = args.name_or_id.toLowerCase();
-      tag = allTags.filter(t => t.name.toLowerCase() === lower)[0];
-    }
-    if (!tag) return JSON.stringify({ success: false, error: 'Tag not found: ' + args.name_or_id });
+    const resolved = __resolveByNameOrId(allTags, args.name_or_id, 'Tag');
+    if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+    const tag = resolved.item;
 
     if (args.name) tag.name = args.name;
     if (args.status && statusMap[args.status]) {
@@ -131,13 +129,11 @@ export async function updateTag(params: { name_or_id: string; name?: string; sta
 
 export async function deleteTag(params: { name_or_id: string }): Promise<any> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
     const allTags = flattenedTags.filter(() => true);
-    let tag = allTags.filter(t => t.id.primaryKey === args.name_or_id)[0];
-    if (!tag) {
-      const lower = args.name_or_id.toLowerCase();
-      tag = allTags.filter(t => t.name.toLowerCase() === lower)[0];
-    }
-    if (!tag) return JSON.stringify({ success: false, error: 'Tag not found: ' + args.name_or_id });
+    const resolved = __resolveByNameOrId(allTags, args.name_or_id, 'Tag');
+    if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+    const tag = resolved.item;
 
     const id = tag.id.primaryKey;
     const name = tag.name;

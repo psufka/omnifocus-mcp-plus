@@ -1,4 +1,5 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 
 export interface DuplicateTaskParams {
   taskId?: string;
@@ -10,73 +11,83 @@ export interface DuplicateTaskParams {
   includeNote?: boolean;
 }
 
+/**
+ * Duplicate a task.
+ *
+ * Uses OmniJS's native `duplicateTasks(tasks, position)` (Database.duplicateTasks,
+ * verified against OmniFocus 185.19) rather than constructing a new Task and
+ * hand-copying fields. The hand-copy approach silently dropped the repetition
+ * rule, subtasks and notifications; the native call deep-copies everything.
+ */
 export async function duplicateTask(params: DuplicateTaskParams): Promise<any> {
   if (!params.taskId && !params.taskName) {
     return { success: false, error: "Either taskId or taskName must be provided" };
   }
 
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
+
     // Find source task
-    let source;
-    if (args.taskId) {
-      source = flattenedTasks.filter(t => t.id.primaryKey === args.taskId)[0];
-    } else {
-      const matches = flattenedTasks.filter(t => t.name === args.taskName);
-      if (matches.length > 1) {
-        return JSON.stringify({ success: false, error: 'Ambiguous task name: multiple matches found. Please use taskId.' });
-      }
-      source = matches[0];
-    }
-    if (!source) return JSON.stringify({ success: false, error: 'Source task not found' });
+    const allTasks = flattenedTasks.filter(() => true);
+    const resolvedSource = __resolveByIdOrName(allTasks, args.taskId, args.taskName, 'Source task');
+    if (resolvedSource.error) return JSON.stringify({ success: false, error: resolvedSource.error });
+    const source = resolvedSource.item;
 
     // Determine destination
     let location;
-    if (args.newProjectId) {
-      const proj = flattenedProjects.filter(p => p.id.primaryKey === args.newProjectId)[0];
-      if (!proj) return JSON.stringify({ success: false, error: 'Destination project not found by ID' });
-      location = proj.ending;
-    } else if (args.newProjectName) {
-      const matches = flattenedProjects.filter(p => p.name === args.newProjectName);
-      if (matches.length === 0) return JSON.stringify({ success: false, error: 'Destination project not found by name' });
-      if (matches.length > 1) return JSON.stringify({ success: false, error: 'Ambiguous destination project name. Please use newProjectId.' });
-      location = matches[0].ending;
+    let destContainer;
+    if (args.newProjectId || args.newProjectName) {
+      const allProjects = flattenedProjects.filter(() => true);
+      const resolvedProject = __resolveByIdOrName(allProjects, args.newProjectId, args.newProjectName, 'Destination project');
+      if (resolvedProject.error) return JSON.stringify({ success: false, error: resolvedProject.error });
+      destContainer = resolvedProject.item;
+      location = destContainer.ending;
     } else if (source.containingProject) {
-      location = source.containingProject.ending;
+      destContainer = source.containingProject;
+      location = destContainer.ending;
     } else {
+      destContainer = inbox;
       location = inbox.ending;
     }
 
-    // Create the duplicate
-    const newTask = new Task(args.newName || source.name, location);
-
-    // Copy note
-    if (args.includeNote !== false && source.note) {
-      newTask.note = source.note;
+    function __destTaskIds() {
+      const list = destContainer === inbox ? inbox.filter(() => true) : destContainer.tasks.filter(() => true);
+      return list.map(t => t.id.primaryKey);
     }
 
-    // Copy dates
-    if (source.dueDate) newTask.dueDate = source.dueDate;
-    if (source.deferDate) newTask.deferDate = source.deferDate;
-    try { if (source.plannedDate) newTask.plannedDate = source.plannedDate; } catch(e) {}
+    // Native deep copy: carries note, dates, flag, estimate, tags, repetition
+    // rule, subtasks and notifications.
+    const beforeIds = __destTaskIds();
+    const duplicates = duplicateTasks([source], location);
 
-    // Copy properties
-    newTask.flagged = source.flagged;
-    if (source.estimatedMinutes) newTask.estimatedMinutes = source.estimatedMinutes;
-
-    // Copy tags
-    if (args.includeTags !== false) {
-      const sourceTags = source.tags.filter(() => true);
-      for (const tag of sourceTags) {
-        newTask.addTag(tag);
-      }
+    let newTask = (duplicates && duplicates.length > 0) ? duplicates[0] : null;
+    if (!newTask) {
+      // Defensive fallback in case a future OmniFocus build stops returning the
+      // duplicates: diff the destination container's direct children.
+      const beforeSet = {};
+      for (const id of beforeIds) { beforeSet[id] = true; }
+      const list = destContainer === inbox ? inbox.filter(() => true) : destContainer.tasks.filter(() => true);
+      const added = list.filter(t => !beforeSet[t.id.primaryKey]);
+      newTask = added.length > 0 ? added[added.length - 1] : null;
     }
+    if (!newTask) {
+      return JSON.stringify({ success: false, error: 'Duplicate was created but could not be located to apply overrides.' });
+    }
+
+    // Apply overrides on top of the deep copy
+    if (args.newName) newTask.name = args.newName;
+    if (args.includeNote === false) newTask.note = '';
+    if (args.includeTags === false) newTask.clearTags();
 
     return JSON.stringify({
       success: true,
       id: newTask.id.primaryKey,
       name: newTask.name,
       sourceId: source.id.primaryKey,
-      sourceName: source.name
+      sourceName: source.name,
+      subtaskCount: newTask.children.filter(() => true).length,
+      hasRepetitionRule: !!newTask.repetitionRule,
+      notificationCount: newTask.notifications ? newTask.notifications.length : 0
     });
   `;
 

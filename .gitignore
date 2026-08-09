@@ -34,12 +34,10 @@ coverage/
 .eslintcache
 
 # Optional REPL history
-.node_repl_history 
+.node_repl_history
 test.js
 omnifocus_api_complete.txt
 mcpTypescriptREADME.txt
-devnotes.md
-
 devnotes.md
 ProjectDevNotes.md
 
@@ -50,9 +48,6 @@ test_*.js
 debug_*.js
 generate_*.js
 .space/
-.npmignore
 
-# Personal files and reports
+# Personal files
 CLAUDE.md
-*报告*.md
-个人文档/

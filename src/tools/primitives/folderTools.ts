@@ -1,4 +1,5 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 
 export async function listFolders(params: { limit?: number } = {}): Promise<any> {
   const script = `
@@ -17,13 +18,11 @@ export async function listFolders(params: { limit?: number } = {}): Promise<any>
 
 export async function getFolder(params: { name_or_id: string }): Promise<any> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
     const allFolders = flattenedFolders.filter(() => true);
-    let folder = allFolders.filter(f => f.id.primaryKey === args.name_or_id)[0];
-    if (!folder) {
-      const lower = args.name_or_id.toLowerCase();
-      folder = allFolders.filter(f => f.name.toLowerCase() === lower)[0];
-    }
-    if (!folder) return JSON.stringify({ success: false, error: 'Folder not found: ' + args.name_or_id });
+    const resolved = __resolveByNameOrId(allFolders, args.name_or_id, 'Folder');
+    if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+    const folder = resolved.item;
 
     const statusNameMap = {};
     statusNameMap[Folder.Status.Active] = 'active';
@@ -54,15 +53,14 @@ export async function getFolder(params: { name_or_id: string }): Promise<any> {
 
 export async function createFolder(params: { name: string; parent?: string }): Promise<any> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
     let location = library.ending;
 
     if (args.parent) {
       const allFolders = flattenedFolders.filter(() => true);
-      const lower = args.parent.toLowerCase();
-      const parentFolder = allFolders.filter(f => f.id.primaryKey === args.parent)[0] ||
-                           allFolders.filter(f => f.name.toLowerCase() === lower)[0];
-      if (!parentFolder) return JSON.stringify({ success: false, error: 'Parent folder not found: ' + args.parent });
-      location = parentFolder.ending;
+      const resolved = __resolveByNameOrId(allFolders, args.parent, 'Parent folder');
+      if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+      location = resolved.item.ending;
     }
 
     const folder = new Folder(args.name, location);
@@ -77,13 +75,11 @@ export async function createFolder(params: { name: string; parent?: string }): P
 
 export async function updateFolder(params: { name_or_id: string; name?: string; status?: 'active' | 'dropped' }): Promise<any> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
     const allFolders = flattenedFolders.filter(() => true);
-    let folder = allFolders.filter(f => f.id.primaryKey === args.name_or_id)[0];
-    if (!folder) {
-      const lower = args.name_or_id.toLowerCase();
-      folder = allFolders.filter(f => f.name.toLowerCase() === lower)[0];
-    }
-    if (!folder) return JSON.stringify({ success: false, error: 'Folder not found: ' + args.name_or_id });
+    const resolved = __resolveByNameOrId(allFolders, args.name_or_id, 'Folder');
+    if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+    const folder = resolved.item;
 
     if (args.name) folder.name = args.name;
     if (args.status) {
@@ -106,13 +102,11 @@ export async function updateFolder(params: { name_or_id: string; name?: string; 
 
 export async function deleteFolder(params: { name_or_id: string }): Promise<any> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
     const allFolders = flattenedFolders.filter(() => true);
-    let folder = allFolders.filter(f => f.id.primaryKey === args.name_or_id)[0];
-    if (!folder) {
-      const lower = args.name_or_id.toLowerCase();
-      folder = allFolders.filter(f => f.name.toLowerCase() === lower)[0];
-    }
-    if (!folder) return JSON.stringify({ success: false, error: 'Folder not found: ' + args.name_or_id });
+    const resolved = __resolveByNameOrId(allFolders, args.name_or_id, 'Folder');
+    if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+    const folder = resolved.item;
 
     const id = folder.id.primaryKey;
     const name = folder.name;

@@ -8,7 +8,7 @@ export const schema = z.object({
   recursive: z.boolean().optional().describe("Include all descendants, not just direct children (default: false)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     if (!args.taskId && !args.taskName) {
       return {

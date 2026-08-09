@@ -14,13 +14,16 @@ export const schema = z.object({
   targetInbox: z.boolean().optional().describe("Move tasks to inbox")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await batchMoveTasks(args);
 
-    if (result.error && !result.success) {
+    // Validation / destination failures abort before any task is attempted, so
+    // there is no per-item detail to show. Anything else renders per item, even
+    // when every task failed.
+    if (!result.success && result.results.length === 0) {
       return {
-        content: [{ type: "text" as const, text: `Error: ${result.error}` }],
+        content: [{ type: "text" as const, text: `Error: ${result.error || 'no tasks were processed'}` }],
         isError: true
       };
     }
@@ -36,11 +39,14 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       if (r.success) {
         output += `✅ ${r.name || r.id}\n`;
       } else {
-        output += `❌ ${r.name || r.id || 'unknown'}: ${r.error}\n`;
+        output += `❌ ${r.name || r.id || `task ${r.index}`}: ${r.error || 'unknown error'}\n`;
       }
     }
 
-    return { content: [{ type: "text" as const, text: output }] };
+    return {
+      content: [{ type: "text" as const, text: output }],
+      ...(succeeded === 0 ? { isError: true } : {})
+    };
   } catch (err: unknown) {
     return {
       content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],

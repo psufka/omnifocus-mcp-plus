@@ -1,15 +1,12 @@
 import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
+import { parseLocalDate, toLocalDateTimeString } from '../../utils/localDate.js';
 
 export interface FilterTasksOptions {
   // Task status filter
   taskStatus?: string[];
 
   // Perspective scope
-  perspective?: 'inbox' | 'flagged' | 'all' | 'custom';
-
-  // Custom perspective parameters
-  customPerspectiveName?: string;
-  customPerspectiveId?: string;
+  perspective?: 'inbox' | 'flagged' | 'all';
 
   // Project/tag filter
   projectFilter?: string;
@@ -57,10 +54,55 @@ export interface FilterTasksOptions {
   sortOrder?: 'asc' | 'desc';
 }
 
+// Date strings that get forwarded to the OmniJS script. Normalizing them means
+// a bare "YYYY-MM-DD" lands on local midnight on both sides of the boundary.
+const DATE_STRING_OPTION_KEYS = [
+  'dueBefore',
+  'dueAfter',
+  'deferBefore',
+  'deferAfter',
+  'plannedBefore',
+  'plannedAfter',
+  'completedBefore',
+  'completedAfter'
+] as const;
+
 function parseDate(value?: string | null): Date | null {
+  // parseLocalDate treats a bare "YYYY-MM-DD" as local midnight; `new Date()`
+  // would read it as UTC midnight, i.e. the previous evening west of UTC.
   if (!value) return null;
-  const parsed = new Date(value);
-  return isNaN(parsed.getTime()) ? null : parsed;
+  return parseLocalDate(value);
+}
+
+function normalizeDateOptions(options: FilterTasksOptions): Record<string, string> {
+  const normalized: Record<string, string> = {};
+
+  DATE_STRING_OPTION_KEYS.forEach(key => {
+    const value = options[key];
+    if (typeof value === 'string' && value.trim() !== '') {
+      normalized[key] = toLocalDateTimeString(value);
+    }
+  });
+
+  return normalized;
+}
+
+// The script reports which filters it applied itself; drop those so the
+// client-side pass does not run them a second time with slightly different
+// clocks and silently shrink the result set.
+function withoutScriptAppliedFilters(options: FilterTasksOptions, appliedFilters: unknown): FilterTasksOptions {
+  if (!Array.isArray(appliedFilters) || appliedFilters.length === 0) {
+    return options;
+  }
+
+  const pending: Record<string, any> = { ...options };
+  appliedFilters.forEach(key => {
+    if (typeof key === 'string' && key in pending) {
+      delete pending[key];
+    }
+  });
+
+  return pending as FilterTasksOptions;
 }
 
 function startOfDay(date: Date): Date {
@@ -124,6 +166,9 @@ function matchesTagFilter(task: any, tagFilters: string[], exactTagMatch: boolea
   return matchMode === 'all' ? tagFilters.every(matchFn) : tagFilters.some(matchFn);
 }
 
+// True when any filter is still pending after the script's own pass. With a
+// current script this is always false — the script pushes all of these down —
+// but it keeps the fallback honest if an older compiled script is in place.
 function shouldApplyClientSideFilters(options: FilterTasksOptions): boolean {
   return Boolean(
     options.tagFilter ||
@@ -355,23 +400,22 @@ export async function filterTasks(options: FilterTasksOptions = {}): Promise<str
       sortOrder = 'asc'
     } = options;
 
-    const needsClientSideFiltering = shouldApplyClientSideFilters(options);
-    const needsClientSideSorting = !['name', 'completedDate'].includes(sortBy);
-    const sourceLimit = (needsClientSideFiltering || needsClientSideSorting) ? Math.max(limit * 20, 1000) : limit;
+    // The script applies every filter and the final sort before it truncates, so
+    // asking for more than `limit` rows would only inflate the payload. (The
+    // old over-fetch existed because truncation happened before the date/tag
+    // filters ran here, which silently dropped late-alphabetical matches.)
+    const sourceLimit = limit;
 
     // Execute filter script
     const result = await executeOmniFocusScript('@filterTasks.js', {
       ...options,
+      ...normalizeDateOptions(options),
       perspective,
       exactTagMatch,
       limit: sourceLimit,
       sortBy,
       sortOrder
     });
-
-    if (typeof result === 'string') {
-      return result;
-    }
 
     // If result is an object, format it
     if (result && typeof result === 'object') {
@@ -391,11 +435,18 @@ export async function filterTasks(options: FilterTasksOptions = {}): Promise<str
       }
 
       if (data.tasks && Array.isArray(data.tasks)) {
-        const postFilteredTasks = applyClientSideFilters(data.tasks, options);
+        const pendingOptions = withoutScriptAppliedFilters(options, data.appliedFilters);
+        const postFilteredTasks = applyClientSideFilters(data.tasks, pendingOptions);
         const sortedTasks = sortTasks(postFilteredTasks, sortBy, sortOrder);
         const limitedTasks = sortedTasks.slice(0, limit);
         const taskCount = limitedTasks.length;
-        const totalCount = sortedTasks.length;
+
+        // When nothing was left for the client-side pass the script's match
+        // count is exact, so it can report how many tasks the cap hid.
+        const scriptMatchedCount = typeof data.matchedCount === 'number' ? data.matchedCount : null;
+        const totalCount = (scriptMatchedCount !== null && !shouldApplyClientSideFilters(pendingOptions))
+          ? scriptMatchedCount
+          : sortedTasks.length;
 
         if (taskCount === 0) {
           output += '🎯 No tasks match your filter criteria.\n';
@@ -432,6 +483,11 @@ export async function filterTasks(options: FilterTasksOptions = {}): Promise<str
 
           // Sort info
           output += `\n📊 **Sorted by**: ${sortBy} (${sortOrder})\n`;
+
+          if (data.truncated) {
+            const cap = typeof data.limitApplied === 'number' ? data.limitApplied : limit;
+            output += `⚠️ **Results capped at ${cap}** — raise \`limit\` or narrow the filter to see the rest.\n`;
+          }
         }
       } else {
         output += 'No task data available\n';

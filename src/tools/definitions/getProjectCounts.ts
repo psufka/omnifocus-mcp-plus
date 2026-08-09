@@ -6,7 +6,7 @@ export const schema = z.object({
   folder: z.string().optional().describe("Optional folder name to scope counts to")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await getProjectCounts(args);
     if (result.success) {

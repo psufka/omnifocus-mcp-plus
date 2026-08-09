@@ -7,7 +7,7 @@ export const schema = z.object({
   taskName: z.string().optional().describe("The name of the task to retrieve (alternative to taskId)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     // Validate that either taskId or taskName is provided
     if (!args.taskId && !args.taskName) {
@@ -30,6 +30,12 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       let infoText = `📋 **Task Information**\n`;
       infoText += `• **Name**: ${task.name}\n`;
       infoText += `• **ID**: ${task.id}\n`;
+
+      // Status must be explicit: a completed boolean alone renders a Dropped
+      // task as if it were Available.
+      const statusLabel = task.taskStatus || (task.completed ? 'Completed' : 'Unknown');
+      const statusIcon = task.dropped ? '🚫' : (task.completed ? '✅' : '○');
+      infoText += `• **Status**: ${statusIcon} ${statusLabel}${task.flagged ? ' 🚩 Flagged' : ''}\n`;
 
       if (task.note) {
         infoText += `• **Note**: ${task.note}\n`;

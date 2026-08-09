@@ -2,7 +2,8 @@
 (() => {
   try {
     const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
-    const days = args.days || 7;
+    // `days` counts today as day 1: days = 7 covers today through today + 6.
+    const days = Math.max(1, args.days || 7);
     const hideCompleted = args.hideCompleted !== undefined ? args.hideCompleted : true;
     const includeDeferredOnly = args.includeDeferredOnly !== undefined ? args.includeDeferredOnly : false;
     
@@ -42,12 +43,15 @@
       tasksByDate: {}
     };
     
-    // Calculate date range
+    // Calculate date range. The window is inclusive on both ends and counts
+    // today as the first day, so `days` buckets are produced (days = 7 →
+    // today through today + 6). setDate() is calendar arithmetic, so this is
+    // DST-safe.
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const endDate = new Date(today);
-    endDate.setDate(today.getDate() + days);
-    
+    endDate.setDate(today.getDate() + (days - 1));
+
     console.log(`Looking for forecast tasks from ${today.toISOString()} to ${endDate.toISOString()}`);
     
     // Get all active tasks
@@ -69,12 +73,19 @@
         let shouldInclude = false;
         let taskDate = null;
         let isDue = false;
-        
-        // Check if task has due date in range
-        if (task.dueDate) {
-          const dueDate = new Date(task.dueDate);
+        let usedEffectiveDate = false;
+
+        // Fall back to the inherited (effective) date when the task has no date
+        // of its own — same convention filter_tasks uses when rendering dates.
+        const rawDueDate = task.dueDate || task.effectiveDueDate || null;
+        const rawDeferDate = task.deferDate || task.effectiveDeferDate || null;
+
+        // Check if task has due date in range.
+        // Skipped entirely when only deferred tasks were requested.
+        if (!includeDeferredOnly && rawDueDate) {
+          const dueDate = new Date(rawDueDate);
           dueDate.setHours(0, 0, 0, 0);
-          
+
           if (dueDate >= today && dueDate <= endDate) {
             shouldInclude = true;
             taskDate = dueDate;
@@ -86,22 +97,25 @@
             taskDate = dueDate;
             isDue = true;
           }
-        }
-        
-        // Check if task has defer date in range (becomes available)
-        if (!includeDeferredOnly || !shouldInclude) {
-          if (task.deferDate && !isDue) {
-            const deferDate = new Date(task.deferDate);
-            deferDate.setHours(0, 0, 0, 0);
-            
-            if (deferDate >= today && deferDate <= endDate) {
-              shouldInclude = true;
-              taskDate = deferDate;
-              isDue = false;
-            }
+
+          if (shouldInclude) {
+            usedEffectiveDate = !task.dueDate;
           }
         }
-        
+
+        // Check if task has defer date in range (becomes available)
+        if (!shouldInclude && rawDeferDate) {
+          const deferDate = new Date(rawDeferDate);
+          deferDate.setHours(0, 0, 0, 0);
+
+          if (deferDate >= today && deferDate <= endDate) {
+            shouldInclude = true;
+            taskDate = deferDate;
+            isDue = false;
+            usedEffectiveDate = !task.deferDate;
+          }
+        }
+
         if (shouldInclude && taskDate) {
           const dateKey = getDateKey(taskDate);
           
@@ -117,7 +131,7 @@
             flagged: task.flagged,
             dueDate: formatDate(task.dueDate),
             deferDate: formatDate(task.deferDate),
-          plannedDate: formatDate(task.plannedDate),
+            plannedDate: formatDate(task.plannedDate),
             effectiveDueDate: formatDate(task.effectiveDueDate),
             effectiveDeferDate: formatDate(task.effectiveDeferDate),
             estimatedMinutes: task.estimatedMinutes,
@@ -125,6 +139,7 @@
             projectName: task.containingProject ? task.containingProject.name : null,
             inInbox: task.inInbox,
             isDue: isDue, // Whether this is due or just becoming available
+            usedEffectiveDate: usedEffectiveDate, // Bucketed by an inherited date
             tags: task.tags.map(tag => ({
               id: tag.id.primaryKey,
               name: tag.name

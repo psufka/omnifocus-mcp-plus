@@ -1,14 +1,17 @@
 {
   "name": "omnifocus-mcp-plus",
   "type": "module",
-  "version": "0.3.3",
-  "description": "🚀 NEW: Native Custom Perspective Access! Enhanced MCP server with OmniFocus custom perspective support, hierarchical task display, AI-optimized tool selection, and comprehensive task management",
+  "version": "0.4.0",
+  "description": "MCP server for OmniFocus 4 — 42 tools for tasks, projects, folders, tags, perspectives, and advanced filtering",
   "main": "dist/server.js",
-  "bin": {
-    "omnifocus-mcp-enhanced": "./cli.cjs"
-  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsc && npm run copy-files && chmod 755 dist/server.js",
+    "build": "tsc -p tsconfig.build.json && npm run copy-files && chmod 755 dist/server.js",
     "copy-files": "mkdir -p dist/utils/omnifocusScripts && cp src/utils/omnifocusScripts/*.js dist/utils/omnifocusScripts/",
     "start": "node dist/server.js",
     "dev": "tsc -w",
@@ -16,11 +19,12 @@
     "test": "npx tsx --test 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/node": "^20.11.19",
+    "tsx": "^4.23.11",
     "typescript": "^5.3.3"
   },
   "repository": {
@@ -31,24 +35,14 @@
   "keywords": [
     "omnifocus",
     "mcp",
-    "claude",
+    "model-context-protocol",
     "task-management",
-    "ai",
-    "subtasks",
-    "enhanced",
-    "productivity",
     "macos",
-    "perspective",
-    "perspective-api",
-    "archivedfillterrules",
-    "omnifocus-4.2",
-    "breakthrough",
-    "killer-feature"
+    "productivity",
+    "applescript",
+    "omnijs"
   ],
-  "author": {
-    "name": "jqlts1",
-    "email": "jqlts1@github.com"
-  },
+  "author": "Paul Sufka <psufka@gmail.com>",
   "engines": {
     "node": ">=18.0.0"
   },

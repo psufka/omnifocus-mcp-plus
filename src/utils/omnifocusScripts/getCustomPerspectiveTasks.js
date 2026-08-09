@@ -2,28 +2,38 @@
 // Based on and improved from user-provided code
 
 (() => {
-  try {
-    // Get injected arguments
-    const perspectiveName = injectedArgs && injectedArgs.perspectiveName ? injectedArgs.perspectiveName : null;
+  // Get injected arguments. Read once here so the catch block below does not
+  // depend on the injected top-level bindings. Named distinctly so it can never
+  // collide with an injected `perspectiveName` declaration in this scope.
+  const requestedPerspectiveName = (typeof injectedArgs !== 'undefined' && injectedArgs && injectedArgs.perspectiveName)
+    ? injectedArgs.perspectiveName
+    : null;
 
-    if (!perspectiveName) {
+  try {
+    if (!requestedPerspectiveName) {
       throw new Error("Perspective name cannot be empty");
     }
 
     // Look up the custom perspective by name
-    let perspective = Perspective.Custom.byName(perspectiveName);
+    let perspective = Perspective.Custom.byName(requestedPerspectiveName);
     if (!perspective) {
-      throw new Error(`No custom perspective found with name "${perspectiveName}"`);
+      throw new Error(`No custom perspective found with name "${requestedPerspectiveName}"`);
     }
 
-    // Switch to the specified perspective
-    document.windows[0].perspective = perspective;
+    // A window is required: reading a perspective's contents goes through the
+    // window's content tree.
+    if (!document.windows || document.windows.length === 0) {
+      throw new Error("OmniFocus has no open window; open one and retry");
+    }
+
+    const targetWindow = document.windows[0];
+
+    // Remember the user's current perspective so the window can be restored —
+    // this is a read-only tool and must not leave the front window switched.
+    const previousPerspective = targetWindow.perspective;
 
     // Map to store all tasks keyed by task ID (supports hierarchical relationships)
     let taskMap = {};
-
-    // Traverse the content tree to collect task info (including hierarchy)
-    let rootNode = document.windows[0].content.rootNode;
 
     function collectTasks(node, parentId) {
       if (node.object && node.object instanceof Task) {
@@ -66,9 +76,25 @@
       }
     }
 
-    // Start collecting tasks (root tasks have parent = null)
-    if (rootNode && rootNode.children) {
-      rootNode.children.forEach(node => collectTasks(node, null));
+    // Switch to the requested perspective only long enough to read its content
+    // tree, then always switch back — even if collection throws.
+    targetWindow.perspective = perspective;
+    try {
+      // Traverse the content tree to collect task info (including hierarchy)
+      const rootNode = targetWindow.content ? targetWindow.content.rootNode : null;
+
+      // Start collecting tasks (root tasks have parent = null)
+      if (rootNode && rootNode.children) {
+        rootNode.children.forEach(node => collectTasks(node, null));
+      }
+    } finally {
+      if (previousPerspective) {
+        try {
+          targetWindow.perspective = previousPerspective;
+        } catch (restoreError) {
+          // Restoring is best-effort; never mask the original result/error.
+        }
+      }
     }
 
     // Count total tasks
@@ -77,7 +103,7 @@
     // Return result (including hierarchical structure)
     const result = {
       success: true,
-      perspectiveName: perspectiveName,
+      perspectiveName: requestedPerspectiveName,
       perspectiveId: perspective.identifier,
       count: taskCount,
       taskMap: taskMap
@@ -90,7 +116,7 @@
     const errorResult = {
       success: false,
       error: error.message || String(error),
-      perspectiveName: perspectiveName || null,
+      perspectiveName: requestedPerspectiveName,
       perspectiveId: null,
       count: 0,
       taskMap: {}

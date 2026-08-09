@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { optionalIsoDate } from '../../utils/zodHelpers.js';
 import { filterTasks } from '../primitives/filterTasks.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 
@@ -30,44 +31,44 @@ export const schema = z.object({
   tagMatchMode: z.enum(["any", "all"]).optional().describe("Match any tag (OR, default) or all tags (AND)"),
 
   // Due date filters
-  dueBefore: z.string().optional().describe("Show tasks due before this date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00)"),
-  dueAfter: z.string().optional().describe("Show tasks due after this date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00)"),
+  dueBefore: optionalIsoDate("Show tasks due before this date. Bare YYYY-MM-DD is safe: it means local midnight that day. Full ISO 8601 (e.g., 2026-03-05T09:00:00-06:00) also accepted"),
+  dueAfter: optionalIsoDate("Show tasks due after this date. Bare YYYY-MM-DD is safe: it means local midnight that day. Full ISO 8601 (e.g., 2026-03-05T09:00:00-06:00) also accepted"),
   dueToday: z.boolean().optional().describe("Show tasks due today"),
-  dueThisWeek: z.boolean().optional().describe("Show tasks due this week"),
+  dueThisWeek: z.boolean().optional().describe("Show tasks due this week (Sunday through Saturday, local time)"),
   dueThisMonth: z.boolean().optional().describe("Show tasks due this month"),
   overdue: z.boolean().optional().describe("Show overdue tasks only"),
 
   // Defer date filters
-  deferBefore: z.string().optional().describe("Show tasks with defer date before this date (ISO format: YYYY-MM-DD)"),
-  deferAfter: z.string().optional().describe("Show tasks with defer date after this date (ISO format: YYYY-MM-DD)"),
+  deferBefore: optionalIsoDate("Show tasks with defer date before this date. Bare YYYY-MM-DD is safe: it means local midnight that day"),
+  deferAfter: optionalIsoDate("Show tasks with defer date after this date. Bare YYYY-MM-DD is safe: it means local midnight that day"),
   deferToday: z.boolean().optional().describe("Show tasks deferred to today"),
-  deferThisWeek: z.boolean().optional().describe("Show tasks deferred to this week"),
+  deferThisWeek: z.boolean().optional().describe("Show tasks deferred to this week (Sunday through Saturday, local time)"),
   deferAvailable: z.boolean().optional().describe("Show tasks whose defer date has passed (now available)"),
 
   // Planned date filters
-  plannedBefore: z.string().optional().describe("Show tasks planned before this date (ISO format: YYYY-MM-DD)"),
-  plannedAfter: z.string().optional().describe("Show tasks planned after this date (ISO format: YYYY-MM-DD)"),
+  plannedBefore: optionalIsoDate("Show tasks planned before this date. Bare YYYY-MM-DD is safe: it means local midnight that day"),
+  plannedAfter: optionalIsoDate("Show tasks planned after this date. Bare YYYY-MM-DD is safe: it means local midnight that day"),
   plannedToday: z.boolean().optional().describe("Show tasks planned for today"),
-  plannedThisWeek: z.boolean().optional().describe("Show tasks planned for this week"),
+  plannedThisWeek: z.boolean().optional().describe("Show tasks planned for this week (Sunday through Saturday, local time)"),
   plannedThisMonth: z.boolean().optional().describe("Show tasks planned for this month"),
 
   // Completion date filters
-  completedBefore: z.string().optional().describe("Show tasks completed before this date (ISO format: YYYY-MM-DD)"),
-  completedAfter: z.string().optional().describe("Show tasks completed after this date (ISO format: YYYY-MM-DD)"),
-  completedToday: z.boolean().optional().describe("Show tasks completed today"),
-  completedThisWeek: z.boolean().optional().describe("Show tasks completed this week"),
-  completedThisMonth: z.boolean().optional().describe("Show tasks completed this month"),
+  completedBefore: optionalIsoDate("Show tasks completed before this date. Bare YYYY-MM-DD is safe: it means local midnight that day"),
+  completedAfter: optionalIsoDate("Show tasks completed after this date. Bare YYYY-MM-DD is safe: it means local midnight that day"),
+  completedToday: z.boolean().optional().describe("Show tasks completed today (since local midnight)"),
+  completedThisWeek: z.boolean().optional().describe("Show tasks completed since the most recent Monday at local midnight"),
+  completedThisMonth: z.boolean().optional().describe("Show tasks completed since the 1st of this month at local midnight"),
 
   // Other filters
   flagged: z.boolean().optional().describe("Filter by flagged status"),
   searchText: z.string().optional().describe("Search in task names and notes"),
   // Output controls
-  limit: z.number().max(1000).optional().describe("Maximum number of tasks to return (default: 100)"),
+  limit: z.number().max(1000).optional().describe("Maximum number of tasks to return (default: 100). Applied after all filters and sorting; the output notes when results were capped"),
   sortBy: z.enum(["name", "dueDate", "deferDate", "plannedDate", "completedDate", "flagged", "project"]).optional().describe("Sort results by field"),
   sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort order (default: asc)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await filterTasks(args);
 

@@ -10,9 +10,6 @@ export async function getTodayCompletedTasks(options: GetTodayCompletedTasksOpti
     
     const result = await executeOmniFocusScript('@todayCompletedTasks.js', { limit });
     
-    if (typeof result === 'string') {
-      return result;
-    }
     
     // If result is an object, format it
     if (result && typeof result === 'object') {

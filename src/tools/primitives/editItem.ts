@@ -1,4 +1,6 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
+import { toLocalDateTimeString } from '../../utils/localDate.js';
 
 // Status options for tasks and projects
 type TaskStatus = 'incomplete' | 'completed' | 'dropped';
@@ -7,7 +9,7 @@ type ProjectStatus = 'active' | 'completed' | 'dropped' | 'onHold';
 // Interface for item edit parameters
 export interface EditItemParams {
   id?: string;                  // ID of the task or project to edit
-  name?: string;                // Name of the task or project to edit (as fallback if ID not provided)
+  name?: string;                // Name of the task or project to edit (used only when no ID is given)
   itemType: 'task' | 'project'; // Type of item to edit
 
   // Common editable fields
@@ -18,12 +20,13 @@ export interface EditItemParams {
   newPlannedDate?: string;      // New planned date in ISO format (empty string to clear)
   newFlagged?: boolean;         // New flagged status (false to remove flag, true to add flag)
   newEstimatedMinutes?: number; // New estimated minutes
+  addTags?: string[];           // Tags to add (tasks and projects both support tags)
+  removeTags?: string[];        // Tags to remove (tasks and projects both support tags)
+  replaceTags?: string[];       // Tags to replace all existing tags with ([] clears every tag)
+  dropAllOccurrences?: boolean; // When dropping a repeating item, drop every future occurrence (default false)
 
   // Task-specific fields
   newStatus?: TaskStatus;       // New status for tasks (incomplete, completed, dropped)
-  addTags?: string[];           // Tags to add to the task
-  removeTags?: string[];        // Tags to remove from the task
-  replaceTags?: string[];       // Tags to replace all existing tags with
   newProjectId?: string;        // Move task to a new project by ID
   newProjectName?: string;      // Move task to a new project by name
   newParentTaskId?: string;     // Move task under a new parent task by ID
@@ -36,6 +39,18 @@ export interface EditItemParams {
   newFolderId?: string;         // New folder to move the project to (by ID)
   newProjectStatus?: ProjectStatus; // New status for projects
 }
+
+// Date fields normalized to local time before the script parses them.
+const DATE_FIELDS = ['newDueDate', 'newDeferDate', 'newPlannedDate'] as const;
+
+// Fields the script only honours for one itemType. Passing them with the other
+// type used to be a silent no-op reported as "updated successfully".
+const PROJECT_ONLY_FIELDS: Array<[keyof EditItemParams, string]> = [
+  ['newSequential', ''],
+  ['newProjectStatus', ' For tasks use newStatus.'],
+  ['newFolderName', ''],
+  ['newFolderId', '']
+];
 
 function hasTaskMoveTarget(params: EditItemParams): boolean {
   return Boolean(
@@ -65,6 +80,24 @@ export function validateEditItemParams(params: EditItemParams): { valid: boolean
       valid: false,
       error: 'Task move parameters are only supported when itemType is "task".'
     };
+  }
+
+  if (params.itemType !== 'task' && params.newStatus !== undefined) {
+    return {
+      valid: false,
+      error: 'newStatus is only supported when itemType is "task". For projects use newProjectStatus.'
+    };
+  }
+
+  if (params.itemType !== 'project') {
+    for (const [field, hint] of PROJECT_ONLY_FIELDS) {
+      if (params[field] !== undefined) {
+        return {
+          valid: false,
+          error: `${field} is only supported when itemType is "project".${hint}`
+        };
+      }
+    }
   }
 
   if (params.newFolderId && params.newFolderName) {
@@ -107,6 +140,24 @@ export function validateEditItemParams(params: EditItemParams): { valid: boolean
 }
 
 /**
+ * Normalize date arguments so a bare "YYYY-MM-DD" means local midnight.
+ * Without this the OmniJS `new Date(str)` call parses it as UTC midnight,
+ * which lands on the previous day everywhere west of UTC.
+ */
+function normalizeDateParams(params: EditItemParams): EditItemParams {
+  const normalized: EditItemParams = { ...params };
+
+  for (const field of DATE_FIELDS) {
+    const value = params[field];
+    if (typeof value === 'string' && value !== '') {
+      normalized[field] = toLocalDateTimeString(value);
+    }
+  }
+
+  return normalized;
+}
+
+/**
  * Edit a task or project in OmniFocus
  */
 export async function editItem(params: EditItemParams): Promise<{
@@ -114,6 +165,7 @@ export async function editItem(params: EditItemParams): Promise<{
   id?: string,
   name?: string,
   changedProperties?: string,
+  warnings?: string[],
   error?: string
 }> {
   try {
@@ -123,72 +175,48 @@ export async function editItem(params: EditItemParams): Promise<{
     }
 
     const script = `
+      ${OMNIJS_LOOKUP_HELPERS}
+
       const collection = args.itemType === 'task' ? flattenedTasks : flattenedProjects;
       const changedProperties = [];
+      const warnings = [];
 
-      // Find the item
-      let item;
-      if (args.id) {
-        item = collection.filter(o => o.id.primaryKey === args.id)[0];
+      // Find the item. An explicit id that matches nothing is an error — it must
+      // never fall back to name matching, or a stale id plus a name matching a
+      // DIFFERENT item silently edits the wrong target.
+      const itemLookup = __resolveByIdOrName(collection, args.id || null, args.name || null, args.itemType);
+      if (itemLookup.error) {
+        return JSON.stringify({ success: false, error: itemLookup.error });
       }
-      if (!item && args.name) {
-        const matches = collection.filter(o => o.name === args.name);
-        if (matches.length > 1) {
-          return JSON.stringify({
-            success: false,
-            error: 'Ambiguous ' + args.itemType + ' name: ' + args.name + '. Multiple matches found; please use id.'
-          });
-        }
-        item = matches[0];
-      }
-      if (!item) {
-        return JSON.stringify({ success: false, error: 'Item not found' });
-      }
-
+      const item = itemLookup.item;
       const itemId = item.id.primaryKey;
-      const itemName = item.name;
 
-      // --- Task move (do first, before property edits) ---
+      // =====================================================================
+      // Phase 1 — resolve and validate EVERY destination first.
+      // Nothing in this phase may mutate the database: a lookup failure has to
+      // leave the item completely untouched (a half-applied edit that renames
+      // the item and then reports "Folder not found" is worse than no edit).
+      // =====================================================================
+      let moveToInbox = false;
+      let destProject = null;
+      let destParent = null;
+      let destFolder = null;
+
       if (args.itemType === 'task') {
         if (args.moveToInbox === true) {
-          moveTasks([item], inbox.ending);
-          changedProperties.push('moved (inbox)');
+          moveToInbox = true;
         } else if (args.newProjectId || args.newProjectName) {
-          let destProject;
-          if (args.newProjectId) {
-            destProject = flattenedProjects.filter(p => p.id.primaryKey === args.newProjectId)[0];
-            if (!destProject) {
-              return JSON.stringify({ success: false, error: 'Destination project not found with ID: ' + args.newProjectId });
-            }
-          } else {
-            const matches = flattenedProjects.filter(p => p.name === args.newProjectName);
-            if (matches.length === 0) {
-              return JSON.stringify({ success: false, error: 'Destination project not found with name: ' + args.newProjectName });
-            }
-            if (matches.length > 1) {
-              return JSON.stringify({ success: false, error: 'Ambiguous destination project name: ' + args.newProjectName + '. Multiple matches found; please use project id.' });
-            }
-            destProject = matches[0];
+          const projectLookup = __resolveByIdOrName(flattenedProjects, args.newProjectId || null, args.newProjectName || null, 'Destination project');
+          if (projectLookup.error) {
+            return JSON.stringify({ success: false, error: projectLookup.error });
           }
-          moveTasks([item], destProject.ending);
-          changedProperties.push('moved (project)');
+          destProject = projectLookup.item;
         } else if (args.newParentTaskId || args.newParentTaskName) {
-          let destParent;
-          if (args.newParentTaskId) {
-            destParent = flattenedTasks.filter(t => t.id.primaryKey === args.newParentTaskId)[0];
-            if (!destParent) {
-              return JSON.stringify({ success: false, error: 'Destination parent task not found with ID: ' + args.newParentTaskId });
-            }
-          } else {
-            const matches = flattenedTasks.filter(t => t.name === args.newParentTaskName);
-            if (matches.length === 0) {
-              return JSON.stringify({ success: false, error: 'Destination parent task not found with name: ' + args.newParentTaskName });
-            }
-            if (matches.length > 1) {
-              return JSON.stringify({ success: false, error: 'Ambiguous destination parent task name: ' + args.newParentTaskName + '. Multiple matches found; please use parent task id.' });
-            }
-            destParent = matches[0];
+          const parentLookup = __resolveByIdOrName(flattenedTasks, args.newParentTaskId || null, args.newParentTaskName || null, 'Destination parent task');
+          if (parentLookup.error) {
+            return JSON.stringify({ success: false, error: parentLookup.error });
           }
+          destParent = parentLookup.item;
 
           // Cycle prevention: walk up from destParent, ensure we don't find item
           let cursor = destParent;
@@ -199,138 +227,10 @@ export async function editItem(params: EditItemParams): Promise<{
             const parent = cursor.parent;
             cursor = (parent && parent.constructor === Task) ? parent : null;
           }
-
-          moveTasks([item], destParent.ending);
-          changedProperties.push('moved (parent task)');
         }
       }
 
-      // --- Common property updates ---
-      if (args.newName !== undefined) {
-        item.name = args.newName;
-        changedProperties.push('name');
-      }
-
-      if (args.newNote !== undefined) {
-        item.note = args.newNote;
-        changedProperties.push('note');
-      }
-
-      if (args.newDueDate !== undefined) {
-        if (args.newDueDate === '') {
-          item.dueDate = null;
-        } else {
-          item.dueDate = new Date(args.newDueDate);
-        }
-        changedProperties.push('due date');
-      }
-
-      if (args.newDeferDate !== undefined) {
-        if (args.newDeferDate === '') {
-          item.deferDate = null;
-        } else {
-          item.deferDate = new Date(args.newDeferDate);
-        }
-        changedProperties.push('defer date');
-      }
-
-      if (args.newPlannedDate !== undefined) {
-        try {
-          if (args.newPlannedDate === '') {
-            item.plannedDate = null;
-          } else {
-            item.plannedDate = new Date(args.newPlannedDate);
-          }
-          changedProperties.push('planned date');
-        } catch(e) {}
-      }
-
-      if (args.newFlagged !== undefined) {
-        item.flagged = args.newFlagged;
-        changedProperties.push('flagged');
-      }
-
-      if (args.newEstimatedMinutes !== undefined) {
-        item.estimatedMinutes = args.newEstimatedMinutes;
-        changedProperties.push('estimated minutes');
-      }
-
-      // --- Task-specific updates ---
-      if (args.itemType === 'task') {
-        if (args.newStatus !== undefined) {
-          if (args.newStatus === 'completed') {
-            item.markComplete();
-            changedProperties.push('status (completed)');
-          } else if (args.newStatus === 'dropped') {
-            item.drop(true);
-            changedProperties.push('status (dropped)');
-          } else if (args.newStatus === 'incomplete') {
-            item.markIncomplete();
-            changedProperties.push('status (incomplete)');
-          }
-        }
-
-        // Tag operations
-        if (args.replaceTags && args.replaceTags.length > 0) {
-          // Clear all existing tags
-          item.clearTags();
-          // Add new tags
-          for (const tagName of args.replaceTags) {
-            let tag = flattenedTags.filter(t => t.name === tagName)[0];
-            if (!tag) tag = new Tag(tagName);
-            item.addTag(tag);
-          }
-          changedProperties.push('tags (replaced)');
-        } else {
-          if (args.addTags && args.addTags.length > 0) {
-            for (const tagName of args.addTags) {
-              let tag = flattenedTags.filter(t => t.name === tagName)[0];
-              if (!tag) tag = new Tag(tagName);
-              item.addTag(tag);
-            }
-            changedProperties.push('tags (added)');
-          }
-
-          if (args.removeTags && args.removeTags.length > 0) {
-            for (const tagName of args.removeTags) {
-              const tag = flattenedTags.filter(t => t.name === tagName)[0];
-              if (tag) {
-                item.removeTag(tag);
-              }
-            }
-            changedProperties.push('tags (removed)');
-          }
-        }
-      }
-
-      // --- Project-specific updates ---
       if (args.itemType === 'project') {
-        if (args.newSequential !== undefined) {
-          item.sequential = args.newSequential;
-          changedProperties.push('sequential');
-        }
-
-        if (args.newProjectStatus !== undefined) {
-          const statusMap = {
-            'active': Project.Status.Active,
-            'completed': Project.Status.Done,
-            'dropped': Project.Status.Dropped,
-            'onHold': Project.Status.OnHold
-          };
-          const newStatus = statusMap[args.newProjectStatus];
-          if (newStatus !== undefined) {
-            if (args.newProjectStatus === 'completed') {
-              item.markComplete();
-            } else if (args.newProjectStatus === 'dropped') {
-              item.drop(true);
-            } else {
-              item.status = newStatus;
-            }
-            changedProperties.push('status');
-          }
-        }
-
-        let destFolder = null;
         if (args.newFolderId) {
           destFolder = flattenedFolders.filter(f => f.id.primaryKey === args.newFolderId)[0];
           if (!destFolder) {
@@ -378,12 +278,166 @@ export async function editItem(params: EditItemParams): Promise<{
           }
           destFolder = folderMatches[0];
         }
-        if (destFolder) {
-          // OF's Omni Automation: there is no moveProjects(); Project.parentFolder
-          // is read-only. The way to move a project (or folder) is moveSections()
-          // with a positional reference like folder.ending — parallels moveTasks().
-          moveSections([item], destFolder.ending);
-          changedProperties.push('folder');
+      }
+
+      // =====================================================================
+      // Phase 2 — every destination resolved; now apply the mutations.
+      // =====================================================================
+
+      // --- Moves (do first, before property edits) ---
+      if (moveToInbox) {
+        moveTasks([item], inbox.ending);
+        changedProperties.push('moved (inbox)');
+      } else if (destProject) {
+        moveTasks([item], destProject.ending);
+        changedProperties.push('moved (project)');
+      } else if (destParent) {
+        moveTasks([item], destParent.ending);
+        changedProperties.push('moved (parent task)');
+      }
+
+      if (destFolder) {
+        // OF's Omni Automation: there is no moveProjects(); Project.parentFolder
+        // is read-only. The way to move a project (or folder) is moveSections()
+        // with a positional reference like folder.ending — parallels moveTasks().
+        moveSections([item], destFolder.ending);
+        changedProperties.push('folder');
+      }
+
+      // --- Common property updates ---
+      if (args.newName !== undefined) {
+        item.name = args.newName;
+        changedProperties.push('name');
+      }
+
+      if (args.newNote !== undefined) {
+        item.note = args.newNote;
+        changedProperties.push('note');
+      }
+
+      if (args.newDueDate !== undefined) {
+        if (args.newDueDate === '') {
+          item.dueDate = null;
+        } else {
+          item.dueDate = new Date(args.newDueDate);
+        }
+        changedProperties.push('due date');
+      }
+
+      if (args.newDeferDate !== undefined) {
+        if (args.newDeferDate === '') {
+          item.deferDate = null;
+        } else {
+          item.deferDate = new Date(args.newDeferDate);
+        }
+        changedProperties.push('defer date');
+      }
+
+      if (args.newPlannedDate !== undefined) {
+        try {
+          if (args.newPlannedDate === '') {
+            item.plannedDate = null;
+          } else {
+            item.plannedDate = new Date(args.newPlannedDate);
+          }
+          changedProperties.push('planned date');
+        } catch(e) {
+          warnings.push('plannedDate not supported by this OmniFocus version — skipped');
+        }
+      }
+
+      if (args.newFlagged !== undefined) {
+        item.flagged = args.newFlagged;
+        changedProperties.push('flagged');
+      }
+
+      if (args.newEstimatedMinutes !== undefined) {
+        item.estimatedMinutes = args.newEstimatedMinutes;
+        changedProperties.push('estimated minutes');
+      }
+
+      // --- Tag operations (tasks AND projects) ---
+      // OmniFocus projects carry tags on their root task and expose the same
+      // addTag/removeTag/clearTags methods as Task, so one code path serves both.
+      // replaceTags: [] means "clear every tag"; omitted means "leave tags alone".
+      if (args.replaceTags !== undefined) {
+        item.clearTags();
+        for (const tagName of args.replaceTags) {
+          let tag = flattenedTags.filter(t => t.name === tagName)[0];
+          if (!tag) tag = new Tag(tagName);
+          item.addTag(tag);
+        }
+        changedProperties.push(args.replaceTags.length === 0 ? 'tags (cleared)' : 'tags (replaced)');
+      } else {
+        if (args.addTags && args.addTags.length > 0) {
+          for (const tagName of args.addTags) {
+            let tag = flattenedTags.filter(t => t.name === tagName)[0];
+            if (!tag) tag = new Tag(tagName);
+            item.addTag(tag);
+          }
+          changedProperties.push('tags (added)');
+        }
+
+        if (args.removeTags && args.removeTags.length > 0) {
+          for (const tagName of args.removeTags) {
+            const tag = flattenedTags.filter(t => t.name === tagName)[0];
+            if (tag) {
+              item.removeTag(tag);
+            }
+          }
+          changedProperties.push('tags (removed)');
+        }
+      }
+
+      // --- Task-specific updates ---
+      if (args.itemType === 'task') {
+        if (args.newStatus !== undefined) {
+          if (args.newStatus === 'completed') {
+            item.markComplete();
+            changedProperties.push('status (completed)');
+          } else if (args.newStatus === 'dropped') {
+            // drop(allOccurrences): false drops only this occurrence of a repeat.
+            item.drop(args.dropAllOccurrences === true);
+            changedProperties.push('status (dropped)');
+          } else if (args.newStatus === 'incomplete') {
+            item.markIncomplete();
+            changedProperties.push('status (incomplete)');
+          }
+        }
+      }
+
+      // --- Project-specific updates ---
+      if (args.itemType === 'project') {
+        if (args.newSequential !== undefined) {
+          item.sequential = args.newSequential;
+          changedProperties.push('sequential');
+        }
+
+        if (args.newProjectStatus !== undefined) {
+          const statusMap = {
+            'active': Project.Status.Active,
+            'completed': Project.Status.Done,
+            'dropped': Project.Status.Dropped,
+            'onHold': Project.Status.OnHold
+          };
+          const newStatus = statusMap[args.newProjectStatus];
+          if (newStatus !== undefined) {
+            if (args.newProjectStatus === 'completed') {
+              item.markComplete();
+            } else if (args.newProjectStatus === 'dropped') {
+              // Project has no drop() in current OmniJS builds (verified against
+              // OmniFocus 4) — assigning status is the documented equivalent.
+              // Use drop() when a build does provide it so dropAllOccurrences applies.
+              if (typeof item.drop === 'function') {
+                item.drop(args.dropAllOccurrences === true);
+              } else {
+                item.status = Project.Status.Dropped;
+              }
+            } else {
+              item.status = newStatus;
+            }
+            changedProperties.push('status');
+          }
         }
       }
 
@@ -391,16 +445,18 @@ export async function editItem(params: EditItemParams): Promise<{
         success: true,
         id: itemId,
         name: item.name,
-        changedProperties: changedProperties.join(', ')
+        changedProperties: changedProperties.join(', '),
+        warnings: warnings
       });
     `;
 
-    const result = await runOmniJs(script, params);
+    const result = await runOmniJs(script, normalizeDateParams(params));
     return {
       success: result.success,
       id: result.id,
       name: result.name,
       changedProperties: result.changedProperties,
+      warnings: result.warnings,
       error: result.error
     };
   } catch (error: any) {

@@ -5,12 +5,12 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 export const schema = z.object({
   items: z.array(z.object({
     id: z.string().optional().describe("The ID of the task or project to remove"),
-    name: z.string().optional().describe("The name of the task or project to remove (as fallback if ID not provided)"),
+    name: z.string().optional().describe("The name of the task or project to remove (used only when no ID is given; an ID that matches nothing is an error and never falls back to the name)"),
     itemType: z.enum(['task', 'project']).describe("Type of item to remove ('task' or 'project')")
   }).strict()).describe("Array of items (tasks or projects) to remove")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     // Validate that each item has at least an ID or name
     for (const item of args.items) {
@@ -24,48 +24,50 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
         };
       }
     }
-    
+
     // Call the batchRemoveItems function
     const result = await batchRemoveItems(args.items as BatchRemoveItemsParams[]);
-    
-    if (result.success) {
-      const successCount = result.results.filter(r => r.success).length;
-      const failureCount = result.results.filter(r => !r.success).length;
-      
-      let message = `✅ Successfully removed ${successCount} items.`;
-      
-      if (failureCount > 0) {
-        message += ` ⚠️ Failed to remove ${failureCount} items.`;
-      }
-      
-      // Include details about removed items
-      const details = result.results.map((item, index) => {
-        if (item.success) {
-          const itemType = args.items[index].itemType;
-          return `- ✅ ${itemType}: "${item.name}"`;
-        } else {
-          const itemType = args.items[index].itemType;
-          const identifier = args.items[index].id || args.items[index].name;
-          return `- ❌ ${itemType}: ${identifier} - Error: ${item.error}`;
-        }
-      }).join('\n');
-      
+
+    // Nothing was attempted (e.g. empty items array) — no per-item detail exists.
+    if (result.results.length === 0) {
       return {
         content: [{
           type: "text" as const,
-          text: `${message}\n\n${details}`
-        }]
-      };
-    } else {
-      // Batch operation failed completely
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Failed to process batch removal: ${result.error}`
+          text: `Failed to process batch removal: ${result.error || 'no items were processed'}`
         }],
         isError: true
       };
     }
+
+    const successCount = result.results.filter(r => r.success).length;
+    const failureCount = result.results.length - successCount;
+
+    let message = successCount > 0
+      ? `✅ Successfully removed ${successCount} items.`
+      : `❌ Failed to remove all ${result.results.length} items.`;
+
+    if (successCount > 0 && failureCount > 0) {
+      message += ` ⚠️ Failed to remove ${failureCount} items.`;
+    }
+
+    // Per-item outcome, always — including when every item failed.
+    const details = result.results.map((item, i) => {
+      const source = args.items[item.index ?? i];
+      const itemType = source?.itemType ?? 'item';
+      if (item.success) {
+        return `- ✅ ${itemType}: "${item.name}"`;
+      }
+      const identifier = item.id || item.name || source?.id || source?.name || `item ${item.index ?? i}`;
+      return `- ❌ ${itemType}: ${identifier} - Error: ${item.error || 'unknown error'}`;
+    }).join('\n');
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: `${message}\n\n${details}`
+      }],
+      ...(successCount === 0 ? { isError: true } : {})
+    };
   } catch (err: unknown) {
     const error = err as Error;
     console.error(`Tool execution error: ${error.message}`);
@@ -77,4 +79,4 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       isError: true
     };
   }
-} 
+}

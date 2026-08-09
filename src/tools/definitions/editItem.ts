@@ -4,38 +4,39 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 import { optionalIsoDate } from '../../utils/zodHelpers.js';
 
 export const schema = z.object({
-  id: z.string().optional().describe("The ID of the task or project to edit"),
-  name: z.string().optional().describe("The name of the task or project to edit (as fallback if ID not provided)"),
+  id: z.string().optional().describe("The ID of the task or project to edit. An ID that matches nothing is an error — it never falls back to the name."),
+  name: z.string().optional().describe("The name of the task or project to edit (used only when no ID is provided; errors on duplicate names)"),
   itemType: z.enum(['task', 'project']).describe("Type of item to edit ('task' or 'project')"),
 
   // Common editable fields
   newName: z.string().optional().describe("New name for the item"),
   newNote: z.string().optional().describe("New note for the item"),
-  newDueDate: optionalIsoDate("Due date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day. Set to empty string to clear."),
-  newDeferDate: optionalIsoDate("Defer date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day. Set to empty string to clear."),
-  newPlannedDate: optionalIsoDate("Planned date in full ISO 8601 format with timezone (e.g., 2026-03-05T09:00:00-06:00). Bare dates like YYYY-MM-DD will display on the wrong day. Set to empty string to clear."),
+  newDueDate: optionalIsoDate("Due date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear."),
+  newDeferDate: optionalIsoDate("Defer date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear."),
+  newPlannedDate: optionalIsoDate("Planned date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear. Requires an OmniFocus build with planned dates; unsupported builds return a warning instead of failing."),
   newFlagged: z.boolean().optional().describe("Set flagged status (set to false for no flag, true for flag)"),
   newEstimatedMinutes: z.number().optional().describe("New estimated minutes"),
+  addTags: z.array(z.string()).optional().describe("Tags to add (works for tasks and projects). Tags that don't exist yet are created."),
+  removeTags: z.array(z.string()).optional().describe("Tags to remove (works for tasks and projects)"),
+  replaceTags: z.array(z.string()).optional().describe("Tags to replace all existing tags with (works for tasks and projects). Pass an empty array to clear every tag; omit the field to leave tags unchanged."),
+  dropAllOccurrences: z.boolean().optional().describe("Only meaningful with newStatus: 'dropped' or newProjectStatus: 'dropped'. Defaults to false, which drops just the current occurrence of a repeating item; set true to drop every future occurrence as well."),
 
-  // Task-specific fields
-  newStatus: z.enum(['incomplete', 'completed', 'dropped']).optional().describe("New status for tasks (incomplete, completed, dropped)"),
-  addTags: z.array(z.string()).optional().describe("Tags to add to the task"),
-  removeTags: z.array(z.string()).optional().describe("Tags to remove from the task"),
-  replaceTags: z.array(z.string()).optional().describe("Tags to replace all existing tags with"),
+  // Task-specific fields (rejected with an error when itemType is 'project')
+  newStatus: z.enum(['incomplete', 'completed', 'dropped']).optional().describe("For tasks: new status (incomplete, completed, dropped). For projects use newProjectStatus."),
   newProjectId: z.string().optional().describe("For tasks: move task to this project ID"),
   newProjectName: z.string().optional().describe("For tasks: move task to this project name (errors on duplicate names)"),
   newParentTaskId: z.string().optional().describe("For tasks: move task under this parent task ID"),
   newParentTaskName: z.string().optional().describe("For tasks: move task under this parent task name (errors on duplicate names)"),
   moveToInbox: z.boolean().optional().describe("For tasks: move task to inbox"),
 
-  // Project-specific fields
-  newSequential: z.boolean().optional().describe("Whether the project should be sequential"),
-  newFolderName: z.string().optional().describe("New folder to move the project to, by name. Accepts slash-separated paths (e.g. 'Someday/Maybe/Travel') when a bare name is ambiguous. Literal-name lookup wins first, so folder names containing '/' still work."),
-  newFolderId: z.string().optional().describe("New folder to move the project to, by ID. Use list_folders to find IDs. Preferred when names are ambiguous and a path is awkward."),
-  newProjectStatus: z.enum(['active', 'completed', 'dropped', 'onHold']).optional().describe("New status for projects")
+  // Project-specific fields (rejected with an error when itemType is 'task')
+  newSequential: z.boolean().optional().describe("For projects: whether the project should be sequential"),
+  newFolderName: z.string().optional().describe("For projects: new folder to move the project to, by name. Accepts slash-separated paths (e.g. 'Someday/Maybe/Travel') when a bare name is ambiguous. Literal-name lookup wins first, so folder names containing '/' still work."),
+  newFolderId: z.string().optional().describe("For projects: new folder to move the project to, by ID. Use list_folders to find IDs. Preferred when names are ambiguous and a path is awkward."),
+  newProjectStatus: z.enum(['active', 'completed', 'dropped', 'onHold']).optional().describe("For projects: new status. For tasks use newStatus.")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     // Validate that either id or name is provided
     if (!args.id && !args.name) {
@@ -60,10 +61,17 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
         changedText = ` (${result.changedProperties})`;
       }
 
+      // Writes that were skipped rather than applied (e.g. plannedDate on an
+      // OmniFocus build without planned-date support) must not be hidden behind
+      // a plain success message.
+      const warningText = result.warnings && result.warnings.length > 0
+        ? `\n⚠️ ${result.warnings.join('\n⚠️ ')}`
+        : '';
+
       return {
         content: [{
           type: "text" as const,
-          text: `✅ ${itemTypeLabel} "${result.name}" updated successfully${changedText}.`
+          text: `✅ ${itemTypeLabel} "${result.name}" updated successfully${changedText}.${warningText}`
         }]
       };
     } else {
@@ -71,11 +79,11 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       let errorMsg = `Failed to update ${args.itemType}`;
 
       if (result.error) {
-        if (result.error.includes("Item not found")) {
-          errorMsg = `${args.itemType.charAt(0).toUpperCase() + args.itemType.slice(1)} not found`;
-          if (args.id) errorMsg += ` with ID "${args.id}"`;
-          if (args.name) errorMsg += `${args.id ? ' or' : ' with'} name "${args.name}"`;
-          errorMsg += '.';
+        // Lookup failures from the shared OmniJS helpers already name the field,
+        // the value tried, and (for a stale ID) that the name was deliberately
+        // NOT tried — so pass them through rather than re-guessing.
+        if (/not found|Ambiguous/i.test(result.error)) {
+          errorMsg = result.error;
         } else {
           errorMsg += `: ${result.error}`;
         }

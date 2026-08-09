@@ -15,9 +15,6 @@ export async function getFlaggedTasks(options: GetFlaggedTasksOptions = {}): Pro
       projectFilter: projectFilter
     });
     
-    if (typeof result === 'string') {
-      return result;
-    }
     
     // If result is an object, format it
     if (result && typeof result === 'object') {
@@ -61,8 +58,13 @@ export async function getFlaggedTasks(options: GetFlaggedTasksOptions = {}): Pro
             }
             
             tasks.forEach((task: any, index: number) => {
-              const dueDateStr = task.dueDate ? ` [DUE: ${new Date(task.dueDate).toLocaleDateString()}]` : '';
-              const deferDateStr = task.deferDate ? ` [DEFER: ${new Date(task.deferDate).toLocaleDateString()}]` : '';
+              // Fall back to inherited dates with an '(eff)' marker, matching filter_tasks
+              const dueDateStr = task.dueDate
+                ? ` [DUE: ${new Date(task.dueDate).toLocaleDateString()}]`
+                : (task.effectiveDueDate ? ` [DUE (eff): ${new Date(task.effectiveDueDate).toLocaleDateString()}]` : '');
+              const deferDateStr = task.deferDate
+                ? ` [DEFER: ${new Date(task.deferDate).toLocaleDateString()}]`
+                : (task.effectiveDeferDate ? ` [DEFER (eff): ${new Date(task.effectiveDeferDate).toLocaleDateString()}]` : '');
               const plannedDateStr = task.plannedDate ? ` [PLAN: ${new Date(task.plannedDate).toLocaleDateString()}]` : '';
               const statusStr = task.taskStatus !== 'Available' ? ` (${task.taskStatus})` : '';
               const estimateStr = task.estimatedMinutes ? ` ⏱${task.estimatedMinutes}m` : '';

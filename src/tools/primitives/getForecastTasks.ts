@@ -17,9 +17,6 @@ export async function getForecastTasks(options: GetForecastTasksOptions = {}): P
       includeDeferredOnly: includeDeferredOnly
     });
     
-    if (typeof result === 'string') {
-      return result;
-    }
     
     // If result is an object, format it
     if (result && typeof result === 'object') {
@@ -29,8 +26,9 @@ export async function getForecastTasks(options: GetForecastTasksOptions = {}): P
         throw new Error(data.error);
       }
       
-      // Format the forecast tasks
-      let output = `# 📅 FORECAST - Next ${days} days\n\n`;
+      // Format the forecast tasks. The window counts today as day 1, so
+      // days = 7 covers today through today + 6.
+      let output = `# 📅 FORECAST - ${days} day${days === 1 ? '' : 's'} (today through ${formatWindowEnd(days)})\n\n`;
       
       if (data.tasksByDate && typeof data.tasksByDate === 'object') {
         const dates = Object.keys(data.tasksByDate).sort();
@@ -47,8 +45,12 @@ export async function getForecastTasks(options: GetForecastTasksOptions = {}): P
             
             const [y, m, d] = dateStr.split('-').map(Number);
             const taskDate = new Date(y, m - 1, d);
-            const isToday = taskDate.getTime() === today.getTime();
-            const isTomorrow = taskDate.getTime() === today.getTime() + 24 * 60 * 60 * 1000;
+            // Compare calendar dates, not epoch offsets: a fixed 86400000ms
+            // step is wrong across DST transitions.
+            const tomorrow = new Date(today);
+            tomorrow.setDate(today.getDate() + 1);
+            const isToday = isSameCalendarDate(taskDate, today);
+            const isTomorrow = isSameCalendarDate(taskDate, tomorrow);
             const isOverdue = taskDate < today;
             
             let dateHeader = '';
@@ -71,9 +73,11 @@ export async function getForecastTasks(options: GetForecastTasksOptions = {}): P
               const statusStr = task.taskStatus !== 'Available' ? ` [${task.taskStatus}]` : '';
               const estimateStr = task.estimatedMinutes ? ` ⏱${task.estimatedMinutes}m` : '';
               const typeIndicator = task.isDue ? '📅' : '🚀'; // Due vs Deferred
-              
+              // Mark tasks placed by an inherited date, matching filter_tasks' '(eff)' convention
+              const effStr = task.usedEffectiveDate ? (task.isDue ? ' [DUE (eff)]' : ' [DEFER (eff)]') : '';
+
               const idStr = task.id ? ` [${task.id}]` : '';
-              output += `• ${typeIndicator} ${flagSymbol}${task.name}${idStr}${projectStr}${statusStr}${estimateStr}\n`;
+              output += `• ${typeIndicator} ${flagSymbol}${task.name}${idStr}${projectStr}${effStr}${statusStr}${estimateStr}\n`;
               
               if (task.note && task.note.trim()) {
                 output += `  📝 ${task.note.trim()}\n`;
@@ -100,4 +104,19 @@ export async function getForecastTasks(options: GetForecastTasksOptions = {}): P
     console.error("Error in getForecastTasks:", error);
     throw new Error(`Failed to get forecast tasks: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
+}
+
+// Compare two dates by calendar day (DST-safe — no fixed-millisecond arithmetic)
+function isSameCalendarDate(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+// Last day of the inclusive forecast window: today counts as day 1
+function formatWindowEnd(days: number): string {
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  end.setDate(end.getDate() + (days - 1));
+  return end.toLocaleDateString();
 }

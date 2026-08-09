@@ -23,6 +23,8 @@ export interface TaskInfo {
   plannedDate?: string;
   flagged: boolean;
   completed: boolean;
+  dropped: boolean;
+  taskStatus: string;
   estimatedMinutes?: number;
 }
 
@@ -52,6 +54,18 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
     let plannedDate = null;
     try { plannedDate = task.plannedDate ? task.plannedDate.toISOString() : null; } catch(e) {}
 
+    // Full status string, same mapping list_subtasks returns — a completed
+    // boolean alone cannot distinguish Dropped from Available.
+    const statusMap = {
+      [Task.Status.Available]: 'Available',
+      [Task.Status.Blocked]: 'Blocked',
+      [Task.Status.Completed]: 'Completed',
+      [Task.Status.Dropped]: 'Dropped',
+      [Task.Status.DueSoon]: 'DueSoon',
+      [Task.Status.Next]: 'Next',
+      [Task.Status.Overdue]: 'Overdue'
+    };
+
     return JSON.stringify({
       success: true,
       task: {
@@ -72,6 +86,8 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
         plannedDate: plannedDate || undefined,
         flagged: task.flagged,
         completed: task.taskStatus === Task.Status.Completed,
+        dropped: task.taskStatus === Task.Status.Dropped,
+        taskStatus: statusMap[task.taskStatus] || 'Unknown',
         estimatedMinutes: task.estimatedMinutes || undefined
       }
     });

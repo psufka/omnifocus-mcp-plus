@@ -5,16 +5,23 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 export const schema = z.object({
   task_id: z.string().describe("The ID of the task"),
   rule_string: z.string().optional().describe("iCal RRULE string, e.g. 'FREQ=DAILY;INTERVAL=1', 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR'. Required unless schedule_type is 'none'."),
-  schedule_type: z.enum(['regularly', 'from_completion', 'none']).describe("'regularly' = fixed schedule, 'from_completion' = repeat X days after completion, 'none' = clear repetition")
+  schedule_type: z.enum(['regularly', 'from_completion', 'defer_from_completion', 'none']).describe("'regularly' = fixed schedule (repeats on the calendar regardless of when you finish), 'from_completion' = OmniFocus 'Due Again' (next due date measured from the completion date), 'defer_from_completion' = OmniFocus 'Defer Another' (next defer date measured from the completion date), 'none' = clear repetition")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+const SCHEDULE_LABELS: Record<string, string> = {
+  regularly: 'fixed schedule',
+  from_completion: 'due again from completion',
+  defer_from_completion: 'defer another from completion',
+  none: 'none'
+};
+
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await setTaskRepetition(args);
     if (result.success) {
       const msg = args.schedule_type === 'none'
         ? `Cleared repetition rule from task "${result.name}"`
-        : `Set repetition on task "${result.name}": ${result.repetitionRule} (${args.schedule_type})`;
+        : `Set repetition on task "${result.name}": ${result.repetitionRule} (${args.schedule_type} — ${SCHEDULE_LABELS[args.schedule_type] ?? args.schedule_type})`;
       return {
         content: [{ type: "text" as const, text: msg }]
       };

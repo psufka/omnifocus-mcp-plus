@@ -8,7 +8,7 @@ export const schema = z.object({
   exactMatch: z.boolean().optional().describe("Set to true for exact tag name match, false for partial (default: false)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await getTasksByTag({
       tagName: args.tagName,

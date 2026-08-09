@@ -7,7 +7,7 @@ export const listFoldersSchema = z.object({
   limit: z.number().min(1).max(500).optional().describe("Maximum number of folders to return (default: 100)")
 }).strict();
 
-export async function listFoldersHandler(args: z.infer<typeof listFoldersSchema>, extra: RequestHandlerExtra) {
+export async function listFoldersHandler(args: z.infer<typeof listFoldersSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await listFolders(args);
     if (result.success) {
@@ -24,7 +24,7 @@ export const getFolderSchema = z.object({
   name_or_id: z.string().describe("Folder name or ID to look up")
 }).strict();
 
-export async function getFolderHandler(args: z.infer<typeof getFolderSchema>, extra: RequestHandlerExtra) {
+export async function getFolderHandler(args: z.infer<typeof getFolderSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await getFolder(args);
     if (result.success) {
@@ -42,7 +42,7 @@ export const createFolderSchema = z.object({
   parent: z.string().optional().describe("Parent folder name or ID (creates at top level if omitted)")
 }).strict();
 
-export async function createFolderHandler(args: z.infer<typeof createFolderSchema>, extra: RequestHandlerExtra) {
+export async function createFolderHandler(args: z.infer<typeof createFolderSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await createFolder(args);
     if (result.success) {
@@ -61,7 +61,7 @@ export const updateFolderSchema = z.object({
   status: z.enum(['active', 'dropped']).optional().describe("New status for the folder")
 }).strict();
 
-export async function updateFolderHandler(args: z.infer<typeof updateFolderSchema>, extra: RequestHandlerExtra) {
+export async function updateFolderHandler(args: z.infer<typeof updateFolderSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await updateFolder(args);
     if (result.success) {
@@ -78,7 +78,7 @@ export const deleteFolderSchema = z.object({
   name_or_id: z.string().describe("Folder name or ID to delete. WARNING: deleting a folder deletes all projects inside it.")
 }).strict();
 
-export async function deleteFolderHandler(args: z.infer<typeof deleteFolderSchema>, extra: RequestHandlerExtra) {
+export async function deleteFolderHandler(args: z.infer<typeof deleteFolderSchema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await deleteFolder(args);
     if (result.success) {

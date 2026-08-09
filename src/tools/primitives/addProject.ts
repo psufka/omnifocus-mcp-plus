@@ -1,4 +1,6 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
+import { toLocalDateTimeString } from '../../utils/localDate.js';
 
 // Interface for project creation parameters
 export interface AddProjectParams {
@@ -10,23 +12,25 @@ export interface AddProjectParams {
   flagged?: boolean;
   estimatedMinutes?: number;
   tags?: string[]; // Tag names
-  folderName?: string; // Folder name to add project to
+  folderName?: string; // Folder name or ID to add project to
   sequential?: boolean; // Whether tasks should be sequential or parallel
 }
 
 /**
  * Add a project to OmniFocus
  */
-export async function addProject(params: AddProjectParams): Promise<{ success: boolean, projectId?: string, error?: string }> {
+export async function addProject(params: AddProjectParams): Promise<{ success: boolean, projectId?: string, name?: string, warnings?: string[], error?: string }> {
   const script = `
+    ${OMNIJS_LOOKUP_HELPERS}
+    const warnings = [];
+
     // Determine location
     let location;
     if (args.folderName) {
-      const folder = flattenedFolders.filter(f => f.name === args.folderName)[0];
-      if (!folder) {
-        return JSON.stringify({ success: false, error: 'Folder not found: ' + args.folderName });
-      }
-      location = folder.ending;
+      const allFolders = flattenedFolders.filter(() => true);
+      const resolved = __resolveByNameOrId(allFolders, args.folderName, 'Folder');
+      if (resolved.error) return JSON.stringify({ success: false, error: resolved.error });
+      location = resolved.item.ending;
     } else {
       location = library.ending;
     }
@@ -37,7 +41,15 @@ export async function addProject(params: AddProjectParams): Promise<{ success: b
     if (args.note) project.note = args.note;
     if (args.dueDate) project.dueDate = new Date(args.dueDate);
     if (args.deferDate) project.deferDate = new Date(args.deferDate);
-    try { if (args.plannedDate) project.plannedDate = new Date(args.plannedDate); } catch(e) {}
+    if (args.plannedDate) {
+      // plannedDate is unsupported on older OmniFocus builds — record the
+      // failure rather than swallowing it and reporting a clean success.
+      try {
+        project.plannedDate = new Date(args.plannedDate);
+      } catch (e) {
+        warnings.push('plannedDate was not set: ' + e.message);
+      }
+    }
     if (args.flagged) project.flagged = true;
     if (args.estimatedMinutes) project.estimatedMinutes = args.estimatedMinutes;
     if (args.sequential !== undefined) project.sequential = args.sequential;
@@ -56,15 +68,27 @@ export async function addProject(params: AddProjectParams): Promise<{ success: b
     return JSON.stringify({
       success: true,
       projectId: project.id.primaryKey,
-      name: project.name
+      name: project.name,
+      warnings: warnings
     });
   `;
 
+  // Bare "YYYY-MM-DD" parses as UTC midnight, which lands on the previous day
+  // west of UTC. Normalize to local midnight before the strings reach OmniJS.
+  const normalized: AddProjectParams = {
+    ...params,
+    ...(params.dueDate ? { dueDate: toLocalDateTimeString(params.dueDate) } : {}),
+    ...(params.deferDate ? { deferDate: toLocalDateTimeString(params.deferDate) } : {}),
+    ...(params.plannedDate ? { plannedDate: toLocalDateTimeString(params.plannedDate) } : {})
+  };
+
   try {
-    const result = await runOmniJs(script, params);
+    const result = await runOmniJs(script, normalized);
     return {
       success: result.success,
       projectId: result.projectId,
+      name: result.name,
+      warnings: result.warnings,
       error: result.error
     };
   } catch (error: any) {

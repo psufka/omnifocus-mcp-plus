@@ -8,28 +8,21 @@ export async function listCustomPerspectives(options: ListCustomPerspectivesOpti
   const { format = 'simple' } = options;
 
   try {
-    console.log('Starting listCustomPerspectives script...');
-
     // Execute the list custom perspectives script
+    // NOTE: stdout is the MCP JSON-RPC channel — diagnostics must use console.error only.
     const result = await executeOmniFocusScript('@listCustomPerspectives.js', {});
-
-    console.log('Script execution complete, result type:', typeof result);
-    console.log('Script execution result:', result);
 
     // Handle various possible return types
     let data: any;
 
     if (typeof result === 'string') {
-      console.log('Result is a string, attempting JSON parse...');
       try {
         data = JSON.parse(result);
-        console.log('JSON parse succeeded:', data);
       } catch (parseError) {
         console.error('JSON parse failed:', parseError);
         throw new Error(`Failed to parse string result: ${result}`);
       }
     } else if (typeof result === 'object' && result !== null) {
-      console.log('Result is an object, using directly...');
       data = result;
     } else {
       console.error('Invalid result type:', typeof result, result);

@@ -1,4 +1,5 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 
 // Interface for item removal parameters
 export interface RemoveItemParams {
@@ -16,27 +17,17 @@ export async function removeItem(params: RemoveItemParams): Promise<{ success: b
   }
 
   const script = `
-    const collection = args.itemType === 'task' ? flattenedTasks : flattenedProjects;
+    ${OMNIJS_LOOKUP_HELPERS}
+    const collection = (args.itemType === 'task' ? flattenedTasks : flattenedProjects).filter(() => true);
+    const label = args.itemType === 'task' ? 'Task' : 'Project';
 
-    let item;
-    if (args.id) {
-      item = collection.filter(o => o.id.primaryKey === args.id)[0];
+    // A stale id must NEVER fall back to a name lookup — that deletes a
+    // different, same-named item.
+    const resolved = __resolveByIdOrName(collection, args.id, args.name, label);
+    if (resolved.error) {
+      return JSON.stringify({ success: false, error: resolved.error });
     }
-
-    if (!item && args.name) {
-      const matches = collection.filter(o => o.name === args.name);
-      if (matches.length > 1) {
-        return JSON.stringify({
-          success: false,
-          error: 'Ambiguous ' + args.itemType + ' name: ' + args.name + '. Multiple matches found; please use id.'
-        });
-      }
-      item = matches[0];
-    }
-
-    if (!item) {
-      return JSON.stringify({ success: false, error: 'Item not found' });
-    }
+    const item = resolved.item;
 
     const itemId = item.id.primaryKey;
     const itemName = item.name;

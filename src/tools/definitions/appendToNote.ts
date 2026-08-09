@@ -24,7 +24,7 @@ export const schema = z.object({
     return { ...d, itemType, id, object_type: itemType, object_id: id };
   });
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await appendToNote(args);
     if (result.success) {

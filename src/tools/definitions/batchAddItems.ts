@@ -1,16 +1,16 @@
 import { z } from 'zod';
 import { batchAddItems, BatchAddItemsParams } from '../primitives/batchAddItems.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import { optionalIsoDate } from '../../utils/zodHelpers.js';
+import { isoDateDescription, optionalIsoDate } from '../../utils/zodHelpers.js';
 
 const batchAddItemSchema = z.object({
   itemType: z.enum(['task', 'project']).optional().describe("Type of item to add ('task' or 'project'). Canonical field; legacy alias 'type' also accepted."),
   type: z.enum(['task', 'project']).optional().describe("[DEPRECATED] Alias for itemType. Prefer itemType."),
   name: z.string().describe("The name of the item"),
   note: z.string().optional().describe("Additional notes for the item"),
-  dueDate: optionalIsoDate("The due date in ISO format (YYYY-MM-DD or full ISO date)"),
-  deferDate: optionalIsoDate("The defer date in ISO format (YYYY-MM-DD or full ISO date)"),
-  plannedDate: optionalIsoDate("The planned date in ISO format (YYYY-MM-DD or full ISO date)"),
+  dueDate: optionalIsoDate(isoDateDescription("The due date")),
+  deferDate: optionalIsoDate(isoDateDescription("The defer date")),
+  plannedDate: optionalIsoDate(isoDateDescription("The planned date")),
   flagged: z.boolean().optional().describe("Whether the item is flagged or not"),
   estimatedMinutes: z.number().optional().describe("Estimated time to complete the item, in minutes"),
   tags: z.array(z.string()).optional().describe("Tags to assign to the item"),
@@ -38,50 +38,55 @@ export const schema = z.object({
   items: z.array(batchAddItemSchema).describe("Array of items (tasks or projects) to add")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     // Call the batchAddItems function
     const result = await batchAddItems(args.items as BatchAddItemsParams[]);
 
-    if (result.success) {
-      const successCount = result.results.filter(r => r.success).length;
-      const failureCount = result.results.filter(r => !r.success).length;
-
-      let message = `✅ Successfully added ${successCount} items.`;
-
-      if (failureCount > 0) {
-        message += ` ⚠️ Failed to add ${failureCount} items.`;
-      }
-
-      // Include details about added items
-      const details = result.results.map((item, index) => {
-        if (item.success) {
-          const itemType = args.items[index].type;
-          const itemName = args.items[index].name;
-          return `- ✅ ${itemType}: "${itemName}"`;
-        } else {
-          const itemType = args.items[index].type;
-          const itemName = args.items[index].name;
-          return `- ❌ ${itemType}: "${itemName}" - Error: ${item.error}`;
-        }
-      }).join('\n');
-
+    // Nothing was attempted (e.g. empty items array) — there is no per-item
+    // detail to show, so report the batch-level error on its own.
+    if (result.results.length === 0) {
       return {
         content: [{
           type: "text" as const,
-          text: `${message}\n\n${details}`
-        }]
-      };
-    } else {
-      // Batch operation failed completely
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Failed to process batch operation: ${result.error}`
+          text: `Failed to process batch operation: ${result.error || 'no items were processed'}`
         }],
         isError: true
       };
     }
+
+    const successCount = result.results.filter(r => r.success).length;
+    const failureCount = result.results.length - successCount;
+
+    let message = successCount > 0
+      ? `✅ Successfully added ${successCount} items.`
+      : `❌ Failed to add all ${result.results.length} items.`;
+
+    if (successCount > 0 && failureCount > 0) {
+      message += ` ⚠️ Failed to add ${failureCount} items.`;
+    }
+
+    // Per-item outcome, always — including when every item failed.
+    const details = result.results.map((item, i) => {
+      const source = args.items[item.index ?? i] as any;
+      const itemType = source?.itemType ?? source?.type ?? 'item';
+      const itemName = item.name || source?.name || `item ${item.index ?? i}`;
+      const lines = item.success
+        ? [`- ✅ ${itemType}: "${itemName}"`]
+        : [`- ❌ ${itemType}: "${itemName}" - Error: ${item.error || 'unknown error'}`];
+      if (item.warnings) {
+        for (const warning of item.warnings) lines.push(`  - ⚠️ ${warning}`);
+      }
+      return lines.join('\n');
+    }).join('\n');
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: `${message}\n\n${details}`
+      }],
+      ...(successCount === 0 ? { isError: true } : {})
+    };
   } catch (err: unknown) {
     const error = err as Error;
     console.error(`Tool execution error: ${error.message}`);

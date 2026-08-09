@@ -7,7 +7,7 @@ export const schema = z.object({
   projectFilter: z.string().optional().describe("Filter flagged tasks by project name (optional)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await getFlaggedTasks({
       hideCompleted: args.hideCompleted !== false, // Default to true

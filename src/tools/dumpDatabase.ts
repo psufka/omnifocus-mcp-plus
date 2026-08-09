@@ -15,6 +15,9 @@ interface OmnifocusDumpTask {
   effectiveDueDate: string | null;
   effectiveDeferDate: string | null;
   effectivePlannedDate: string | null;
+  completionDate?: string | null;
+  dropDate?: string | null;
+  repetitionRule?: string | null;
   estimatedMinutes: number | null;
   completedByChildren: boolean;
   sequential: boolean;
@@ -61,23 +64,49 @@ interface OmnifocusDumpTag {
   tasks: string[];
 }
 
+// Reported by the dump script when completed/dropped tasks are included: the per-project
+// cap that was applied and how many older completed tasks were left out.
+export interface CompletedTaskSummary {
+  cap: number;
+  totalOmitted: number;
+  omittedByContainer: Record<string, number>;
+}
+
+// The database plus the (optional) completed-task cap report
+export interface OmnifocusDumpDatabase extends OmnifocusDatabase {
+  completedSummary?: CompletedTaskSummary;
+}
+
 interface OmnifocusDumpData {
   exportDate: string;
   tasks: OmnifocusDumpTask[];
   projects: Record<string, OmnifocusDumpProject>;
   folders: Record<string, OmnifocusDumpFolder>;
   tags: Record<string, OmnifocusDumpTag>;
+  completedSummary?: CompletedTaskSummary;
+}
+
+export interface DumpDatabaseOptions {
+  // When false, completed and dropped items are included in the dump (capped per project)
+  hideCompleted?: boolean;
 }
 
 // Main function to dump the database
-export async function dumpDatabase(): Promise<OmnifocusDatabase> {
-  
+export async function dumpDatabase(options: DumpDatabaseOptions = {}): Promise<OmnifocusDumpDatabase> {
+
   try {
+    const hideCompleted = options.hideCompleted !== false; // Default to true
+
     // Execute the OmniFocus script
-    const data = await executeOmniFocusScript('@omnifocusDump.js') as OmnifocusDumpData;
+    const data = await executeOmniFocusScript('@omnifocusDump.js', { hideCompleted }) as OmnifocusDumpData;
     // wait 1 second
     await new Promise(resolve => setTimeout(resolve, 1000));
- 
+
+    // A failed or unparseable dump must error, not render an empty report
+    if (data && (data as any).error) {
+      throw new Error((data as any).error);
+    }
+
     // Create an empty database if no data returned
     if (!data) {
       return {
@@ -88,16 +117,21 @@ export async function dumpDatabase(): Promise<OmnifocusDatabase> {
         tags: {}
       };
     }
-    
+
     // Initialize the database object
-    const database: OmnifocusDatabase = {
+    const database: OmnifocusDumpDatabase = {
       exportDate: data.exportDate,
       tasks: [],
       projects: {},
       folders: {},
       tags: {}
     };
-    
+
+    // Carry the completed-task cap report through so the report can note it
+    if (data.completedSummary) {
+      database.completedSummary = data.completedSummary;
+    }
+
     // Process tasks
     if (data.tasks && Array.isArray(data.tasks)) {
       // Convert the tasks to our OmnifocusTask format
@@ -113,8 +147,8 @@ export async function dumpDatabase(): Promise<OmnifocusDatabase> {
           note: String(task.note || ""),
           flagged: Boolean(task.flagged),
           completed: task.taskStatus === "Completed",
-          completionDate: null, // Not available in the new format
-          dropDate: null, // Not available in the new format
+          completionDate: task.completionDate || null,
+          dropDate: task.dropDate || null,
           taskStatus: String(task.taskStatus),
           active: task.taskStatus !== "Completed" && task.taskStatus !== "Dropped",
           dueDate: task.dueDate,
@@ -130,9 +164,9 @@ export async function dumpDatabase(): Promise<OmnifocusDatabase> {
           hasChildren: (task.children && task.children.length > 0) || false,
           sequential: Boolean(task.sequential),
           completedByChildren: Boolean(task.completedByChildren),
-          isRepeating: false, // Not available in the new format
-          repetitionMethod: null, // Not available in the new format 
-          repetitionRule: null, // Not available in the new format
+          isRepeating: Boolean(task.repetitionRule),
+          repetitionMethod: null, // Not available in the new format
+          repetitionRule: task.repetitionRule || null,
           attachments: [], // Default empty array
           linkedFileURLs: [], // Default empty array
           notifications: [], // Default empty array

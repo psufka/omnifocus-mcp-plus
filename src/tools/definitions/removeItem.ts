@@ -3,12 +3,12 @@ import { removeItem, RemoveItemParams } from '../primitives/removeItem.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 
 export const schema = z.object({
-  id: z.string().optional().describe("The ID of the task or project to remove"),
-  name: z.string().optional().describe("The name of the task or project to remove (as fallback if ID not provided)"),
+  id: z.string().optional().describe("The ID of the task or project to remove. If provided and it matches nothing, the removal fails — it does NOT fall back to the name."),
+  name: z.string().optional().describe("The name of the task or project to remove (used only when no ID is given). Must match exactly one item; ambiguous names are rejected."),
   itemType: z.enum(['task', 'project']).describe("Type of item to remove ('task' or 'project')")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
+export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     // Validate that either id or name is provided
     if (!args.id && !args.name) {
@@ -49,20 +49,12 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
         }]
       };
     } else {
-      // Item removal failed
-      let errorMsg = `Failed to remove ${args.itemType}`;
-      
-      if (result.error) {
-        if (result.error.includes("Item not found")) {
-          errorMsg = `${args.itemType.charAt(0).toUpperCase() + args.itemType.slice(1)} not found`;
-          if (args.id) errorMsg += ` with ID "${args.id}"`;
-          if (args.name) errorMsg += `${args.id ? ' or' : ' with'} name "${args.name}"`;
-          errorMsg += '.';
-        } else {
-          errorMsg += `: ${result.error}`;
-        }
-      }
-      
+      // Item removal failed. The primitive's lookup errors are already precise
+      // (stale ID, ambiguous name, not found), so pass them straight through.
+      const errorMsg = result.error
+        ? `Failed to remove ${args.itemType}: ${result.error}`
+        : `Failed to remove ${args.itemType}`;
+
       return {
         content: [{
           type: "text" as const,
