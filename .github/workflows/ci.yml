@@ -1,0 +1,27 @@
+name: CI
+
+# Typecheck, unit tests, and build on every push/PR.
+#
+# Runs on macOS (free for public repos) so the platform matches production —
+# but NO test here talks to OmniFocus: unit tests mock the executors, and the
+# spawn-path tests point OMNIFOCUS_OSASCRIPT_BIN at a fake binary they write
+# themselves. Live verification is scripts/mcp-smoke.mjs, run locally only.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
