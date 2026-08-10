@@ -17,8 +17,19 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
   try {
     const result = await listProjects(args);
     if (result.success) {
+      // Re-render date fields local before they reach the caller — the
+      // primitive carries raw UTC ISO strings, which read as the wrong
+      // calendar day in any timezone behind UTC.
+      const localized = {
+        ...result,
+        projects: (result.projects ?? []).map((p: any) => ({
+          ...p,
+          ...(p.dueDate ? { dueDate: new Date(p.dueDate).toLocaleString() } : {}),
+          ...(p.completionDate ? { completionDate: new Date(p.completionDate).toLocaleString() } : {}),
+        })),
+      };
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }]
+        content: [{ type: "text" as const, text: JSON.stringify(localized, null, 2) }]
       };
     } else {
       return {

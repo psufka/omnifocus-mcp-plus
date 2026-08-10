@@ -18,10 +18,19 @@ export const schema = z.object({
   parentTaskName: z.string().optional().describe("The name of the parent task to create this task as a subtask (alternative to parentTaskId)")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
+/** Test-only seam: production always uses the real primitive. */
+export interface AddOmniFocusTaskDeps {
+  addOmniFocusTask: typeof addOmniFocusTask;
+}
+
+export async function handler(
+  args: z.infer<typeof schema>,
+  extra: RequestHandlerExtra<any, any>,
+  deps: AddOmniFocusTaskDeps = { addOmniFocusTask }
+) {
   try {
     // Call the addOmniFocusTask function
-    const result = await addOmniFocusTask(args as AddOmniFocusTaskParams);
+    const result = await deps.addOmniFocusTask(args as AddOmniFocusTaskParams);
 
     if (result.success) {
       // Task was added successfully
@@ -47,7 +56,25 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       const planned = args.plannedDate ? parseLocalDate(args.plannedDate) : null;
       let plannedDateText = planned ? ` planned for ${planned.toLocaleDateString()}` : "";
 
-      let text = `✅ Task "${args.name}" created successfully ${locationText}${dueDateText}${plannedDateText}${tagText}.`;
+      // The task exists (the script fails outright if the read-back finds
+      // nothing), but it may not be where it was asked to go — say so instead
+      // of printing an unqualified success.
+      const placementVerified = result.verified !== false;
+
+      // The id is the whole point of the call for an agent: without it the
+      // next step (tag it, move it, complete it) has to go hunting by name.
+      const idText = result.taskId ? ` [id: ${result.taskId}]` : '';
+
+      let text = placementVerified
+        ? `✅ Task "${args.name}" created successfully ${locationText}${dueDateText}${plannedDateText}${tagText}.${idText}`
+        : `⚠️ Task "${args.name}" was created${dueDateText}${plannedDateText}${tagText}, but NOT ${locationText}.${idText}`;
+
+      // Placement mismatch: the read-back inside the creation script found the
+      // task in a different container than the one requested. This is the check
+      // that catches schema drift silently routing every task to the inbox.
+      if (result.warning) {
+        text += `\n\n⚠️ ${result.warning}`;
+      }
 
       // Non-fatal problems (e.g. plannedDate unsupported by this OmniFocus
       // build) used to be swallowed by a silent catch in the script.

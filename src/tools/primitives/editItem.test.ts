@@ -239,8 +239,143 @@ test('editItem normalizes bare dates to local time before running the script', (
   assert.doesNotMatch(definitionSource, /will display on the wrong day/, 'schema still warns that bare dates are buggy');
 });
 
+// --- Post-write read-back verification (v0.5.0) ---------------------------
+
+test('editItem verifies every requested field after applying the edit', () => {
+  const firstWrite = primitiveSource.indexOf('item.name = args.newName');
+  const verifyPhase = primitiveSource.indexOf('Phase 3 — read-back verification');
+
+  assert.ok(verifyPhase > 0, 'script has no read-back verification phase');
+  assert.ok(verifyPhase > firstWrite, 'verification must run after the writes, not before');
+  assert.match(primitiveSource, /verified: mismatches\.length === 0/, 'result does not carry a verified flag');
+  assert.match(primitiveSource, /mismatches: mismatches/, 'result does not carry the mismatch list');
+});
+
+test('editItem read-back compares dates by timestamp, not by string', () => {
+  assert.match(primitiveSource, /const verifyDate = function/, 'missing date verification helper');
+  assert.match(primitiveSource, /Math\.abs\(want - got\) > 1000/, 'dates are not compared as timestamps with slack');
+});
+
+test('editItem read-back compares tags by set equality', () => {
+  assert.match(primitiveSource, /const sameSet = function/, 'missing set-equality helper for tags');
+  assert.match(primitiveSource, /recordMismatch\('replaceTags'/, 'replaceTags is not verified');
+  assert.match(primitiveSource, /recordMismatch\('addTags'/, 'addTags is not verified');
+  assert.match(primitiveSource, /recordMismatch\('removeTags'/, 'removeTags is not verified');
+});
+
+test('editItem read-back reads project status from .status, not the root task status', () => {
+  // Project.taskStatus exists but reports the ROOT TASK's status (Blocked/Next).
+  assert.match(primitiveSource, /const raw = String\(item\.status\)/, 'project status verification does not read .status');
+  assert.match(primitiveSource, /recordMismatch\('newProjectStatus'/, 'project status is not verified');
+});
+
+test('editItem read-back does not report a repeating task as a failed completion', () => {
+  assert.match(primitiveSource, /Repeating task: this occurrence was completed/, 'repeating completions are treated as mismatches');
+});
+
+test('editItem verification is additive — move_task still gets its existing fields', () => {
+  // move_task renders success/id/name/changedProperties; changing or dropping
+  // them would break it.
+  assert.match(primitiveSource, /changedProperties: changedProperties\.join\(', '\)/, 'changedProperties was dropped from the result');
+  assert.match(primitiveSource, /warnings: warnings/, 'warnings was dropped from the result');
+  assert.match(primitiveSource, /id: itemId/, 'id was dropped from the result');
+});
+
+test('edit_item handler reports a failed read-back instead of a clean success', () => {
+  assert.match(definitionSource, /result\.verified === false/, 'handler ignores the verification flag');
+  assert.match(definitionSource, /read-back verification failed/, 'handler does not explain a failed verification');
+  assert.match(definitionSource, /result\.mismatches/, 'handler does not list the mismatched fields');
+});
+
 test('editItem surfaces plannedDate warnings instead of swallowing them', () => {
   assert.match(primitiveSource, /warnings\.push\('plannedDate not supported by this OmniFocus version/, 'plannedDate failure is still swallowed');
   assert.doesNotMatch(primitiveSource, /catch\(e\) \{\}/, 'script still has an empty catch block');
   assert.match(definitionSource, /result\.warnings/, 'handler does not surface script warnings');
+});
+
+// --- Mismatch rendering: no UTC leak ---------------------------------------
+
+const UTC_TIMESTAMP_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/;
+
+test('editItem records date mismatches as epoch ms, never as an ISO string', () => {
+  // A toISOString() here was rendered verbatim by the handler, putting
+  // `expected "2026-03-06T06:00:00.000Z"` in front of the caller — a UTC
+  // timestamp for a date the caller gave as local.
+  assert.match(primitiveSource, /recordMismatch\(field, want, got, 'date'\)/, 'verifyDate does not record raw epoch ms');
+  assert.doesNotMatch(
+    primitiveSource,
+    /recordMismatch\(\s*field,\s*want === null \? null : new Date\(want\)\.toISOString\(\)/,
+    'verifyDate still stores an ISO string in the mismatch'
+  );
+});
+
+test('edit_item renders a date mismatch in local time, with no Z timestamp', async () => {
+  const { handler } = await import('../definitions/editItem.js');
+  const expected = new Date(2026, 2, 6, 0, 0, 0).getTime();
+  const actual = new Date(2026, 2, 7, 9, 30, 0).getTime();
+
+  const result: any = await handler(
+    { id: 't1', itemType: 'task', newDueDate: '2026-03-06' } as any,
+    {} as any,
+    {
+      editItem: async () => ({
+        success: true,
+        id: 't1',
+        name: 'Renew passport',
+        changedProperties: 'dueDate',
+        verified: false,
+        mismatches: [{ field: 'newDueDate', expected, actual, kind: 'date' as const }]
+      })
+    } as any
+  );
+
+  const text = result.content[0].text;
+  assert.equal(result.isError, true, 'a failed read-back must not be a clean success');
+  assert.doesNotMatch(text, UTC_TIMESTAMP_RE, `rendered mismatch leaked a UTC timestamp: ${text}`);
+  assert.ok(text.includes(new Date(expected).toLocaleString()), `expected local rendering in: ${text}`);
+  assert.ok(text.includes(new Date(actual).toLocaleString()), `actual local rendering in: ${text}`);
+});
+
+test('edit_item renders a cleared date mismatch as "none", not as null or a Z string', async () => {
+  const { handler } = await import('../definitions/editItem.js');
+
+  const result: any = await handler(
+    { id: 't1', itemType: 'task', newDueDate: '' } as any,
+    {} as any,
+    {
+      editItem: async () => ({
+        success: true,
+        id: 't1',
+        name: 'Renew passport',
+        verified: false,
+        mismatches: [
+          { field: 'newDueDate', expected: null, actual: new Date(2026, 2, 7).getTime(), kind: 'date' as const }
+        ]
+      })
+    } as any
+  );
+
+  const text = result.content[0].text;
+  assert.match(text, /expected none/);
+  assert.doesNotMatch(text, UTC_TIMESTAMP_RE);
+});
+
+test('edit_item still renders non-date mismatches as plain values', async () => {
+  const { handler } = await import('../definitions/editItem.js');
+
+  const result: any = await handler(
+    { id: 't1', itemType: 'task', newFlagged: true } as any,
+    {} as any,
+    {
+      editItem: async () => ({
+        success: true,
+        id: 't1',
+        name: 'Renew passport',
+        verified: false,
+        mismatches: [{ field: 'newFlagged', expected: true, actual: false }]
+      })
+    } as any
+  );
+
+  assert.match(result.content[0].text, /newFlagged: expected true, got false/);
 });

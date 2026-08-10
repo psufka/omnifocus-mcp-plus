@@ -19,7 +19,11 @@ function unwrapObject(schema: z.ZodTypeAny): z.ZodObject<any> {
   return current;
 }
 
-const batchItemShape = unwrapObject((batchAddItemsSchema.shape.items as z.ZodArray<any>).element).shape;
+// batchAddItemsSchema itself is now wrapped in a superRefine (tempId/atomic
+// cross-item rules), so unwrap the top level before reaching for `items`.
+const batchItemShape = unwrapObject(
+  (unwrapObject(batchAddItemsSchema).shape.items as z.ZodArray<any>).element
+).shape;
 const DATE_FIELDS = ['dueDate', 'deferDate', 'plannedDate'] as const;
 
 for (const field of DATE_FIELDS) {

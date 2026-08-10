@@ -62,21 +62,229 @@ export function validateAddTaskParams(params: AddOmniFocusTaskParams): { valid: 
 }
 
 /**
- * OmniJS source for `__createTask(spec, warnings)` — the single implementation
- * of task creation, shared by add_omnifocus_task and batch_add_items so the two
- * can never drift. Returns { task } or { error }; failures to write plannedDate
- * (older OmniFocus builds have no such property) are pushed onto `warnings`
- * rather than silently swallowed.
+ * OmniJS source for placement resolution and post-write verification, shared by
+ * add_omnifocus_task and all three batch tools (it lives here, next to
+ * __createTask, so the resolve step a dry run performs is byte-for-byte the one
+ * the real write performs).
+ *
+ * Two jobs:
+ *   1. `__resolveTaskPlacement` / `__resolveProjectPlacement` / `__resolveTagsSpec`
+ *      answer "where would this go / which tags are missing" WITHOUT writing.
+ *      A dry run stops after this step; a real run hands the resolved placement
+ *      straight to the create helper.
+ *   2. `__verifyTaskPlacement` / `__verifyProjectPlacement` read the object back
+ *      after the write and compare its ACTUAL container against the requested
+ *      one. Upstream once shipped schema drift that silently routed every
+ *      batched task to the inbox while reporting success — this is what makes
+ *      that class of bug loud instead of invisible.
  *
  * Requires OMNIJS_LOOKUP_HELPERS to be prepended. Written without template
  * literals, backslashes or '$' so the runOmniJs escaping layer leaves it alone.
  */
-export const OMNIJS_CREATE_TASK_HELPER = `
-  function __applyTagsTo(item, tagNames) {
+export const OMNIJS_PLACEMENT_HELPERS = `
+  // A placement carries an OmniJS insertion point in .location that must never
+  // be serialized (JSON.stringify on an OmniJS object yields {}).
+  function __publicPlacement(p) {
+    if (!p) { return null; }
+    var out = { kind: p.kind };
+    if (p.id) { out.id = p.id; }
+    if (p.name) { out.name = p.name; }
+    if (p.tempId) { out.tempId = p.tempId; }
+    if (p.pending === true) { out.pending = true; }
+    return out;
+  }
+
+  function __placementLabel(p) {
+    if (!p) { return 'an unknown location'; }
+    if (p.kind === 'inbox') { return 'the inbox'; }
+    if (p.kind === 'library') { return 'the library top level'; }
+    var label = p.name ? '"' + p.name + '"' : (p.id ? p.id : '(unnamed)');
+    if (p.kind === 'parentTask') { return 'parent task ' + label; }
+    if (p.kind === 'project') { return 'project ' + label; }
+    if (p.kind === 'folder') { return 'folder ' + label; }
+    return p.kind + ' ' + label;
+  }
+
+  function __placementMatches(requested, actual) {
+    if (!requested || !actual) { return false; }
+    if (requested.kind !== actual.kind) { return false; }
+    if (requested.kind === 'inbox' || requested.kind === 'library') { return true; }
+    if (requested.id && actual.id) { return requested.id === actual.id; }
+    return requested.name === actual.name;
+  }
+
+  // inInbox is true only for a DIRECT child of the inbox; an inbox subtask
+  // reports its parent task instead.
+  function __isDirectInboxItem(task) {
+    var flag = false;
+    try { flag = (task.inInbox === true); } catch (e) { flag = false; }
+    return flag;
+  }
+
+  function __actualTaskPlacement(task) {
+    var proj = null;
+    try { proj = task.containingProject; } catch (e) { proj = null; }
+    var projId = null;
+    var projName = null;
+    if (proj) {
+      try { projId = proj.id.primaryKey; projName = proj.name; } catch (e) { projId = null; }
+    }
+
+    if (!projId && __isDirectInboxItem(task)) { return { kind: 'inbox', id: null, name: null }; }
+
+    var parent = null;
+    try { parent = task.parent; } catch (e) { parent = null; }
+    var parentIsTask = false;
+    try { parentIsTask = !!(parent && typeof Task !== 'undefined' && parent.constructor === Task); } catch (e) { parentIsTask = false; }
+    var parentId = null;
+    var parentName = null;
+    if (parentIsTask) {
+      try { parentId = parent.id.primaryKey; parentName = parent.name; } catch (e) { parentId = null; }
+    }
+
+    // A project's root task shares the project's primaryKey, so a task sitting
+    // directly under a project reports that project as its parent.
+    if (parentId && parentId !== projId) { return { kind: 'parentTask', id: parentId, name: parentName }; }
+    if (projId) { return { kind: 'project', id: projId, name: projName }; }
+    return { kind: 'inbox', id: null, name: null };
+  }
+
+  function __actualProjectPlacement(project) {
+    var folder = null;
+    try { folder = project.parentFolder; } catch (e) { folder = null; }
+    if (folder) {
+      var fid = null;
+      var fname = null;
+      try { fid = folder.id.primaryKey; fname = folder.name; } catch (e) { fid = null; }
+      return { kind: 'folder', id: fid, name: fname };
+    }
+    return { kind: 'library', id: null, name: null };
+  }
+
+  function __resolveTaskPlacement(spec) {
+    if (spec.parentTaskId || spec.parentTaskName) {
+      var parentLookup = __resolveByIdOrName(flattenedTasks, spec.parentTaskId, spec.parentTaskName, 'Parent task');
+      if (parentLookup.error) { return { error: parentLookup.error }; }
+      var parentTask = parentLookup.item;
+      return { placement: { kind: 'parentTask', id: parentTask.id.primaryKey, name: parentTask.name, location: parentTask.ending } };
+    }
+    if (spec.projectName) {
+      var projectLookup = __resolveByIdOrName(flattenedProjects, null, spec.projectName, 'Project');
+      if (projectLookup.error) { return { error: projectLookup.error }; }
+      var project = projectLookup.item;
+      return { placement: { kind: 'project', id: project.id.primaryKey, name: project.name, location: project.ending } };
+    }
+    return { placement: { kind: 'inbox', id: null, name: null, location: inbox.ending } };
+  }
+
+  function __resolveProjectPlacement(spec) {
+    if (spec.folderName) {
+      var folderLookup = __resolveByNameOrId(flattenedFolders, spec.folderName, 'Folder');
+      if (folderLookup.error) { return { error: folderLookup.error }; }
+      var folder = folderLookup.item;
+      return { placement: { kind: 'folder', id: folder.id.primaryKey, name: folder.name, location: folder.ending } };
+    }
+    return { placement: { kind: 'library', id: null, name: null, location: library.ending } };
+  }
+
+  // Pure read: which of these tag names exist already, and which would have to
+  // be created. Lets a dry run report new tags without creating any.
+  function __resolveTagsSpec(tagNames) {
+    var existing = [];
+    var missing = [];
+    if (!tagNames) { return { existing: existing, missing: missing }; }
     for (var ti = 0; ti < tagNames.length; ti++) {
       var tagName = tagNames[ti];
       var tag = flattenedTags.filter(function (t) { return t.name === tagName; })[0];
-      if (!tag) { tag = new Tag(tagName); }
+      if (tag) { existing.push(tagName); } else { missing.push(tagName); }
+    }
+    return { existing: existing, missing: missing };
+  }
+
+  // Returns { exists, verified, actual, warning }. exists=false means the write
+  // did not land at all (a hard failure); verified=false with exists=true means
+  // it landed somewhere other than requested.
+  function __verifyTaskPlacement(task, requested) {
+    var out = { exists: false, verified: false, actual: null, warning: null };
+    var id = null;
+    try { id = task.id.primaryKey; } catch (e) { id = null; }
+    if (!id) {
+      out.warning = 'Task could not be identified after the write (no primaryKey).';
+      return out;
+    }
+
+    var fetched = task;
+    if (typeof Task !== 'undefined' && typeof Task.byIdentifier === 'function') {
+      fetched = Task.byIdentifier(id);
+    }
+    if (!fetched) {
+      out.warning = 'Task ' + id + ' does not exist after the write (read-back returned null).';
+      return out;
+    }
+
+    out.exists = true;
+    out.actual = __actualTaskPlacement(fetched);
+    if (__placementMatches(requested, out.actual)) {
+      out.verified = true;
+      return out;
+    }
+    out.warning = 'Placement not verified: requested ' + __placementLabel(requested) + ' but the task is in ' + __placementLabel(out.actual) + '.';
+    return out;
+  }
+
+  function __verifyProjectPlacement(project, requested) {
+    var out = { exists: false, verified: false, actual: null, warning: null };
+    var id = null;
+    try { id = project.id.primaryKey; } catch (e) { id = null; }
+    if (!id) {
+      out.warning = 'Project could not be identified after the write (no primaryKey).';
+      return out;
+    }
+
+    var fetched = project;
+    if (typeof Project !== 'undefined' && typeof Project.byIdentifier === 'function') {
+      fetched = Project.byIdentifier(id);
+    }
+    if (!fetched) {
+      out.warning = 'Project ' + id + ' does not exist after the write (read-back returned null).';
+      return out;
+    }
+
+    out.exists = true;
+    out.actual = __actualProjectPlacement(fetched);
+    if (__placementMatches(requested, out.actual)) {
+      out.verified = true;
+      return out;
+    }
+    out.warning = 'Placement not verified: requested ' + __placementLabel(requested) + ' but the project is in ' + __placementLabel(out.actual) + '.';
+    return out;
+  }
+`;
+
+/**
+ * OmniJS source for `__createTask(spec, warnings, created, presetPlacement)` —
+ * the single implementation of task creation, shared by add_omnifocus_task and
+ * batch_add_items so the two can never drift. Returns { task, placement } or
+ * { error }; failures to write plannedDate (older OmniFocus builds have no such
+ * property) are pushed onto `warnings` rather than silently swallowed.
+ *
+ * `created` (optional) is the batch's creation-order ledger used for atomic
+ * rollback — every object this helper brings into existence, including tags it
+ * has to create, is appended to it.
+ *
+ * Requires OMNIJS_LOOKUP_HELPERS and OMNIJS_PLACEMENT_HELPERS to be prepended.
+ * Written without template literals, backslashes or '$' so the runOmniJs
+ * escaping layer leaves it alone.
+ */
+export const OMNIJS_CREATE_TASK_HELPER = `
+  function __applyTagsTo(item, tagNames, created) {
+    for (var ti = 0; ti < tagNames.length; ti++) {
+      var tagName = tagNames[ti];
+      var tag = flattenedTags.filter(function (t) { return t.name === tagName; })[0];
+      if (!tag) {
+        tag = new Tag(tagName);
+        if (created) { created.push({ obj: tag, kind: 'tag', name: tagName }); }
+      }
       item.addTag(tag);
     }
   }
@@ -89,31 +297,30 @@ export const OMNIJS_CREATE_TASK_HELPER = `
     }
   }
 
-  function __createTask(spec, warnings) {
-    var location;
-    if (spec.parentTaskId || spec.parentTaskName) {
-      var parentLookup = __resolveByIdOrName(flattenedTasks, spec.parentTaskId, spec.parentTaskName, 'Parent task');
-      if (parentLookup.error) { return { error: parentLookup.error }; }
-      location = parentLookup.item.ending;
-    } else if (spec.projectName) {
-      var projectLookup = __resolveByIdOrName(flattenedProjects, null, spec.projectName, 'Project');
-      if (projectLookup.error) { return { error: projectLookup.error }; }
-      location = projectLookup.item.ending;
-    } else {
-      location = inbox.ending;
-    }
-
-    var task = new Task(spec.name, location);
-
+  function __applyTaskFields(task, spec, warnings, created) {
     if (spec.note !== undefined) { task.note = spec.note; }
     if (spec.dueDate) { task.dueDate = new Date(spec.dueDate); }
     if (spec.deferDate) { task.deferDate = new Date(spec.deferDate); }
     if (spec.plannedDate) { __setPlannedDate(task, spec.plannedDate, warnings); }
     if (spec.flagged !== undefined) { task.flagged = spec.flagged; }
     if (spec.estimatedMinutes !== undefined) { task.estimatedMinutes = spec.estimatedMinutes; }
-    if (spec.tags && spec.tags.length > 0) { __applyTagsTo(task, spec.tags); }
+    if (spec.tags && spec.tags.length > 0) { __applyTagsTo(task, spec.tags, created); }
+  }
 
-    return { task: task };
+  function __createTask(spec, warnings, created, presetPlacement) {
+    var placement = presetPlacement;
+    if (!placement) {
+      var resolved = __resolveTaskPlacement(spec);
+      if (resolved.error) { return { error: resolved.error }; }
+      placement = resolved.placement;
+    }
+
+    var task = new Task(spec.name, placement.location);
+    if (created) { created.push({ obj: task, kind: 'task', name: spec.name }); }
+
+    __applyTaskFields(task, spec, warnings, created);
+
+    return { task: task, placement: placement };
   }
 `;
 
@@ -121,26 +328,53 @@ export const OMNIJS_CREATE_TASK_HELPER = `
 // object — so it is built once at module load.
 export const ADD_TASK_SCRIPT = `
   ${OMNIJS_LOOKUP_HELPERS}
+  ${OMNIJS_PLACEMENT_HELPERS}
   ${OMNIJS_CREATE_TASK_HELPER}
 
   const warnings = [];
   const created = __createTask(args, warnings);
   if (created.error) {
-    return JSON.stringify({ success: false, error: created.error });
+    return JSON.stringify({ success: false, verified: false, error: created.error });
+  }
+
+  // Read the task back in THIS script and confirm it landed where it was asked
+  // to. Background sync mutates the database between script invocations, so a
+  // second round-trip would be verifying a different database state.
+  const check = __verifyTaskPlacement(created.task, created.placement);
+  if (!check.exists) {
+    return JSON.stringify({ success: false, verified: false, error: check.warning });
   }
 
   return JSON.stringify({
     success: true,
     taskId: created.task.id.primaryKey,
     name: created.task.name,
-    warnings: warnings
+    warnings: warnings,
+    verified: check.verified,
+    warning: check.warning,
+    requestedPlacement: __publicPlacement(created.placement),
+    actualPlacement: __publicPlacement(check.actual)
   });
 `;
+
+export interface AddOmniFocusTaskResult {
+  success: boolean;
+  taskId?: string;
+  name?: string;
+  warnings?: string[];
+  error?: string;
+  /** Read-back inside the same script confirmed existence AND placement. */
+  verified?: boolean;
+  /** Set when the task exists but landed outside the requested container. */
+  warning?: string;
+  requestedPlacement?: { kind: string; id?: string; name?: string };
+  actualPlacement?: { kind: string; id?: string; name?: string };
+}
 
 /**
  * Add a task to OmniFocus
  */
-export async function addOmniFocusTask(params: AddOmniFocusTaskParams): Promise<{ success: boolean, taskId?: string, name?: string, warnings?: string[], error?: string }> {
+export async function addOmniFocusTask(params: AddOmniFocusTaskParams): Promise<AddOmniFocusTaskResult> {
   try {
     // Validate parent task parameters
     const validation = validateAddTaskParams(params);
@@ -154,7 +388,11 @@ export async function addOmniFocusTask(params: AddOmniFocusTaskParams): Promise<
       taskId: result.taskId,
       name: result.name,
       warnings: Array.isArray(result.warnings) && result.warnings.length > 0 ? result.warnings : undefined,
-      error: result.error
+      error: result.error,
+      verified: typeof result.verified === 'boolean' ? result.verified : undefined,
+      warning: typeof result.warning === 'string' && result.warning ? result.warning : undefined,
+      requestedPlacement: result.requestedPlacement || undefined,
+      actualPlacement: result.actualPlacement || undefined
     };
   } catch (error: any) {
     return {

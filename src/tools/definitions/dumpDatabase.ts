@@ -65,9 +65,10 @@ function finishedTime(task: any): number {
 export function formatCompactReport(database: any, options: { hideCompleted: boolean, hideRecurringDuplicates: boolean }): string {
   const { hideCompleted, hideRecurringDuplicates } = options;
 
-  // Get current date for the header
+  // Get current date for the header — LOCAL calendar day (toISOString is UTC
+  // and would show tomorrow's date after ~7pm Central).
   const today = new Date();
-  const dateStr = today.toISOString().split('T')[0];
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   let output = `# OMNIFOCUS [${dateStr}]\n\n`;
 

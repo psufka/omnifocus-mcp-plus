@@ -1,6 +1,45 @@
 import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
 import { parseLocalDate, toLocalDateTimeString } from '../../utils/localDate.js';
 
+// One flat clause condition. Deliberately NOT recursive: `and` / `or` / `not`
+// take these directly, one level deep, so the whole predicate set can be
+// compiled once and evaluated inside the OmniJS script.
+export interface FilterCondition {
+  taskStatus?: string[];
+  flagged?: boolean;
+  hasNote?: boolean;
+  isRepeating?: boolean;
+  projectFilter?: string;
+  tagFilter?: string | string[];
+  tagMatchMode?: 'any' | 'all';
+  nameContains?: string;
+  nameMatches?: string;
+  searchText?: string;
+  dueBefore?: string;
+  dueAfter?: string;
+  deferBefore?: string;
+  deferAfter?: string;
+  plannedBefore?: string;
+  plannedAfter?: string;
+  completedBefore?: string;
+  completedAfter?: string;
+  addedBefore?: string;
+  addedAfter?: string;
+  modifiedBefore?: string;
+  modifiedAfter?: string;
+  droppedBefore?: string;
+  droppedAfter?: string;
+}
+
+export interface EstimatedMinutesFilter {
+  lessThan?: number;
+  greaterThan?: number;
+  equals?: number;
+  between?: [number, number];
+}
+
+export type FilterTaskField = 'dates' | 'status' | 'estimate' | 'note' | 'tags' | 'project';
+
 export interface FilterTasksOptions {
   // Task status filter
   taskStatus?: string[];
@@ -8,8 +47,10 @@ export interface FilterTasksOptions {
   // Perspective scope
   perspective?: 'inbox' | 'flagged' | 'all';
 
-  // Project/tag filter
+  // Project/tag/folder filter
   projectFilter?: string;
+  folderName?: string;
+  folderId?: string;
   tagFilter?: string | string[];
   exactTagMatch?: boolean;
   tagMatchMode?: 'any' | 'all';
@@ -44,12 +85,33 @@ export interface FilterTasksOptions {
   completedThisWeek?: boolean;
   completedThisMonth?: boolean;
 
+  // Metadata date filters
+  addedBefore?: string;
+  addedAfter?: string;
+  modifiedBefore?: string;
+  modifiedAfter?: string;
+  droppedBefore?: string;
+  droppedAfter?: string;
+
   // Other dimensions
   flagged?: boolean;
   searchText?: string;
+  nameContains?: string;
+  nameMatches?: string;
+  hasNote?: boolean;
+  isRepeating?: boolean;
+  estimatedMinutes?: EstimatedMinutesFilter;
+
+  // Logical clauses (one level, no nesting)
+  and?: FilterCondition[];
+  or?: FilterCondition[];
+  not?: FilterCondition;
 
   // Output control
+  fields?: FilterTaskField[];
+  countOnly?: boolean;
   limit?: number;
+  offset?: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
 }
@@ -64,8 +126,66 @@ const DATE_STRING_OPTION_KEYS = [
   'plannedBefore',
   'plannedAfter',
   'completedBefore',
-  'completedAfter'
+  'completedAfter',
+  'addedBefore',
+  'addedAfter',
+  'modifiedBefore',
+  'modifiedAfter',
+  'droppedBefore',
+  'droppedAfter'
 ] as const;
+
+// The date keys a clause condition may carry. Same normalization applies.
+const CONDITION_DATE_KEYS = [
+  'dueBefore', 'dueAfter',
+  'deferBefore', 'deferAfter',
+  'plannedBefore', 'plannedAfter',
+  'completedBefore', 'completedAfter',
+  'addedBefore', 'addedAfter',
+  'modifiedBefore', 'modifiedAfter',
+  'droppedBefore', 'droppedAfter'
+] as const;
+
+/**
+ * Every key an `and` / `or` / `not` condition may contain. This MUST stay in
+ * lockstep with the CONDITION_KEYS list inside omnifocusScripts/filterTasks.js
+ * — the script is what actually evaluates them, so a key that exists here but
+ * not there would be silently dropped and return an unfiltered result set. A
+ * unit test asserts the two lists are identical.
+ */
+export const CONDITION_KEYS: readonly string[] = [
+  'taskStatus', 'flagged', 'hasNote', 'isRepeating', 'projectFilter',
+  'tagFilter', 'tagMatchMode', 'nameContains', 'nameMatches', 'searchText',
+  ...CONDITION_DATE_KEYS
+];
+
+const ALL_FIELDS: FilterTaskField[] = ['dates', 'status', 'estimate', 'note', 'tags', 'project'];
+
+interface FieldFlags {
+  dates: boolean;
+  status: boolean;
+  estimate: boolean;
+  note: boolean;
+  tags: boolean;
+  project: boolean;
+}
+
+const EVERY_FIELD: FieldFlags = {
+  dates: true, status: true, estimate: true, note: true, tags: true, project: true
+};
+
+function resolveFields(fields?: FilterTaskField[]): FieldFlags {
+  // Omitted (or empty) means "render everything", which is the pre-0.5.0 shape.
+  if (!fields || fields.length === 0) return EVERY_FIELD;
+  return {
+    dates: fields.includes('dates'),
+    status: fields.includes('status'),
+    estimate: fields.includes('estimate'),
+    note: fields.includes('note'),
+    tags: fields.includes('tags'),
+    project: fields.includes('project')
+  };
+}
 
 function parseDate(value?: string | null): Date | null {
   // parseLocalDate treats a bare "YYYY-MM-DD" as local midnight; `new Date()`
@@ -85,6 +205,71 @@ function normalizeDateOptions(options: FilterTasksOptions): Record<string, strin
   });
 
   return normalized;
+}
+
+/**
+ * Reject any clause key the OmniJS evaluator does not implement, and any empty
+ * clause. Both would otherwise widen the result set silently — an unfiltered
+ * answer that looks exactly like a filtered one is the worst failure mode this
+ * tool has, so it fails loudly instead.
+ */
+function validateCondition(condition: FilterCondition, where: string): void {
+  if (!condition || typeof condition !== 'object' || Array.isArray(condition)) {
+    throw new Error(`Condition ${where} must be an object of predicates.`);
+  }
+
+  const present = Object.keys(condition).filter(
+    key => (condition as Record<string, unknown>)[key] !== undefined
+  );
+
+  const unsupported = present.filter(key => !CONDITION_KEYS.includes(key));
+  if (unsupported.length > 0) {
+    throw new Error(
+      `Unsupported condition key(s) in ${where}: ${unsupported.join(', ')}. ` +
+      `filter_tasks clause conditions support only: ${CONDITION_KEYS.join(', ')}.`
+    );
+  }
+
+  // tagMatchMode modifies tagFilter; on its own it constrains nothing.
+  if (present.filter(key => key !== 'tagMatchMode').length === 0) {
+    throw new Error(`Condition ${where} is empty: specify at least one predicate.`);
+  }
+}
+
+export function validateClauses(options: FilterTasksOptions): void {
+  (options.and ?? []).forEach((condition, index) => validateCondition(condition, `and[${index}]`));
+  (options.or ?? []).forEach((condition, index) => validateCondition(condition, `or[${index}]`));
+  if (options.or && options.or.length === 0) {
+    throw new Error('The "or" clause was supplied with no conditions. An empty OR matches nothing; remove the key or add at least one condition.');
+  }
+  if (options.not !== undefined) validateCondition(options.not, 'not');
+}
+
+function normalizeCondition(condition: FilterCondition): FilterCondition {
+  const normalized: Record<string, unknown> = { ...condition };
+  CONDITION_DATE_KEYS.forEach(key => {
+    const value = condition[key];
+    if (typeof value === 'string' && value.trim() !== '') {
+      normalized[key] = toLocalDateTimeString(value);
+    }
+  });
+  return normalized as FilterCondition;
+}
+
+function normalizeClauseOptions(options: FilterTasksOptions): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  if (options.and) normalized.and = options.and.map(normalizeCondition);
+  if (options.or) normalized.or = options.or.map(normalizeCondition);
+  if (options.not !== undefined) normalized.not = normalizeCondition(options.not);
+  return normalized;
+}
+
+function hasLogicalClauses(options: FilterTasksOptions): boolean {
+  return Boolean(
+    (options.and && options.and.length > 0) ||
+    (options.or && options.or.length > 0) ||
+    options.not
+  );
 }
 
 // The script reports which filters it applied itself; drop those so the
@@ -389,6 +574,121 @@ export function applyClientSideFilters(tasks: any[], options: FilterTasksOptions
   return filteredTasks;
 }
 
+/**
+ * Render the script payload as markdown. Split out from filterTasks() so the
+ * exact production output can be golden-tested without touching OmniFocus.
+ */
+export function renderFilterTasksResult(data: any, options: FilterTasksOptions = {}): string {
+  const {
+    limit = 100,
+    sortBy = 'name',
+    sortOrder = 'asc'
+  } = options;
+  const offset = Math.max(0, Math.floor(options.offset ?? 0));
+
+  if (data.error) {
+    throw new Error(data.error);
+  }
+
+  // Format filter results
+  let output = `# 🔍 FILTERED TASKS\n\n`;
+
+  // Show filter summary
+  const filterSummary = buildFilterSummary(options);
+  if (filterSummary) {
+    output += `**Filter**: ${filterSummary}\n\n`;
+  }
+
+  // countOnly never serializes tasks, so it renders its own one-liner.
+  if (data.countOnly) {
+    const count = typeof data.count === 'number' ? data.count : 0;
+    output += `🔢 **${count} matching task${count === 1 ? '' : 's'}** (countOnly — no task details were read).\n`;
+    return output;
+  }
+
+  if (data.tasks && Array.isArray(data.tasks)) {
+    // With a page offset or a logical clause in play, the script's slice IS the
+    // answer: re-filtering, re-sorting or re-slicing here would drop rows from
+    // the middle of a paginated run and silently corrupt the page boundaries.
+    const scriptAuthoritative = offset > 0 || hasLogicalClauses(options);
+
+    let limitedTasks: any[];
+    let totalCount: number;
+
+    if (scriptAuthoritative) {
+      limitedTasks = data.tasks;
+      totalCount = typeof data.matchedCount === 'number' ? data.matchedCount : data.tasks.length;
+    } else {
+      const pendingOptions = withoutScriptAppliedFilters(options, data.appliedFilters);
+      const postFilteredTasks = applyClientSideFilters(data.tasks, pendingOptions);
+      const sortedTasks = sortTasks(postFilteredTasks, sortBy, sortOrder);
+      limitedTasks = sortedTasks.slice(0, limit);
+
+      // When nothing was left for the client-side pass the script's match
+      // count is exact, so it can report how many tasks the cap hid.
+      const scriptMatchedCount = typeof data.matchedCount === 'number' ? data.matchedCount : null;
+      totalCount = (scriptMatchedCount !== null && !shouldApplyClientSideFilters(pendingOptions))
+        ? scriptMatchedCount
+        : sortedTasks.length;
+    }
+
+    const taskCount = limitedTasks.length;
+    const fields = resolveFields(options.fields);
+
+    if (taskCount === 0) {
+      output += '🎯 No tasks match your filter criteria.\n';
+
+      // Suggestions
+      output += '\n**Tips**:\n';
+      output += '- Try broadening your search criteria\n';
+      output += '- Check if tasks exist in the specified project/tags\n';
+      output += '- Use `get_inbox_tasks` or `get_flagged_tasks` for basic views\n';
+    } else {
+      output += `Found ${taskCount} task${taskCount === 1 ? '' : 's'}`;
+      if (offset > 0) {
+        output += ` (showing ${offset + 1}–${offset + taskCount} of ${totalCount})`;
+      } else if (taskCount < totalCount) {
+        output += ` (showing first ${taskCount} of ${totalCount})`;
+      }
+      output += ':\n\n';
+
+      // Group tasks by project
+      const tasksByProject = groupTasksByProject(limitedTasks);
+      const showGroupHeaders = fields.project && tasksByProject.size > 1;
+
+      tasksByProject.forEach((tasks, projectName) => {
+        if (showGroupHeaders) {
+          output += `## 📁 ${projectName}\n`;
+        }
+
+        tasks.forEach((task: any) => {
+          output += formatTask(task, fields);
+          output += '\n';
+        });
+
+        if (showGroupHeaders) {
+          output += '\n';
+        }
+      });
+
+      // Sort info
+      output += `\n📊 **Sorted by**: ${sortBy} (${sortOrder})\n`;
+
+      if (data.truncated) {
+        const cap = typeof data.limitApplied === 'number' ? data.limitApplied : limit;
+        output += `⚠️ **Results capped at ${cap}** — raise \`limit\` or narrow the filter to see the rest.\n`;
+        if (offset > 0 || hasLogicalClauses(options)) {
+          output += `➡️ Next page: \`offset: ${offset + taskCount}\`.\n`;
+        }
+      }
+    }
+  } else {
+    output += 'No task data available\n';
+  }
+
+  return output;
+}
+
 export async function filterTasks(options: FilterTasksOptions = {}): Promise<string> {
   try {
     // Set defaults
@@ -399,101 +699,34 @@ export async function filterTasks(options: FilterTasksOptions = {}): Promise<str
       sortBy = 'name',
       sortOrder = 'asc'
     } = options;
+    const offset = Math.max(0, Math.floor(options.offset ?? 0));
 
-    // The script applies every filter and the final sort before it truncates, so
+    // Reject unevaluable clause keys BEFORE touching OmniFocus. The script
+    // validates them again — this side just fails faster and cheaper.
+    validateClauses(options);
+
+    // The script applies every filter and the final sort before it pages, so
     // asking for more than `limit` rows would only inflate the payload. (The
     // old over-fetch existed because truncation happened before the date/tag
     // filters ran here, which silently dropped late-alphabetical matches.)
     const sourceLimit = limit;
 
-    // Execute filter script
+    // Execute filter script (pure read — no mutation anywhere in filterTasks.js)
     const result = await executeOmniFocusScript('@filterTasks.js', {
       ...options,
       ...normalizeDateOptions(options),
+      ...normalizeClauseOptions(options),
       perspective,
       exactTagMatch,
       limit: sourceLimit,
+      offset,
       sortBy,
       sortOrder
-    });
+    }, { readOnly: true });
 
     // If result is an object, format it
     if (result && typeof result === 'object') {
-      const data = result as any;
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      // Format filter results
-      let output = `# 🔍 FILTERED TASKS\n\n`;
-
-      // Show filter summary
-      const filterSummary = buildFilterSummary(options);
-      if (filterSummary) {
-        output += `**Filter**: ${filterSummary}\n\n`;
-      }
-
-      if (data.tasks && Array.isArray(data.tasks)) {
-        const pendingOptions = withoutScriptAppliedFilters(options, data.appliedFilters);
-        const postFilteredTasks = applyClientSideFilters(data.tasks, pendingOptions);
-        const sortedTasks = sortTasks(postFilteredTasks, sortBy, sortOrder);
-        const limitedTasks = sortedTasks.slice(0, limit);
-        const taskCount = limitedTasks.length;
-
-        // When nothing was left for the client-side pass the script's match
-        // count is exact, so it can report how many tasks the cap hid.
-        const scriptMatchedCount = typeof data.matchedCount === 'number' ? data.matchedCount : null;
-        const totalCount = (scriptMatchedCount !== null && !shouldApplyClientSideFilters(pendingOptions))
-          ? scriptMatchedCount
-          : sortedTasks.length;
-
-        if (taskCount === 0) {
-          output += '🎯 No tasks match your filter criteria.\n';
-
-          // Suggestions
-          output += '\n**Tips**:\n';
-          output += '- Try broadening your search criteria\n';
-          output += '- Check if tasks exist in the specified project/tags\n';
-          output += '- Use `get_inbox_tasks` or `get_flagged_tasks` for basic views\n';
-        } else {
-          output += `Found ${taskCount} task${taskCount === 1 ? '' : 's'}`;
-          if (taskCount < totalCount) {
-            output += ` (showing first ${taskCount} of ${totalCount})`;
-          }
-          output += ':\n\n';
-
-          // Group tasks by project
-          const tasksByProject = groupTasksByProject(limitedTasks);
-
-          tasksByProject.forEach((tasks, projectName) => {
-            if (tasksByProject.size > 1) {
-              output += `## 📁 ${projectName}\n`;
-            }
-
-            tasks.forEach((task: any) => {
-              output += formatTask(task);
-              output += '\n';
-            });
-
-            if (tasksByProject.size > 1) {
-              output += '\n';
-            }
-          });
-
-          // Sort info
-          output += `\n📊 **Sorted by**: ${sortBy} (${sortOrder})\n`;
-
-          if (data.truncated) {
-            const cap = typeof data.limitApplied === 'number' ? data.limitApplied : limit;
-            output += `⚠️ **Results capped at ${cap}** — raise \`limit\` or narrow the filter to see the rest.\n`;
-          }
-        }
-      } else {
-        output += 'No task data available\n';
-      }
-
-      return output;
+      return renderFilterTasksResult(result, options);
     }
 
     return 'Unexpected result format from OmniFocus';
@@ -553,7 +786,38 @@ function buildFilterSummary(options: FilterTasksOptions): string {
     conditions.push(`Search: "${options.searchText}"`);
   }
 
+  // --- 0.5.0 additions. Appended after the legacy block so the summary line
+  // for a pre-0.5.0 call is byte-for-byte what it always was.
+  if (options.folderName) conditions.push(`Folder: "${options.folderName}"`);
+  else if (options.folderId) conditions.push(`Folder id: ${options.folderId}`);
+
+  if (options.nameContains) conditions.push(`Name contains: "${options.nameContains}"`);
+  if (options.nameMatches) conditions.push(`Name matches: /${options.nameMatches}/i`);
+  if (options.hasNote !== undefined) conditions.push(`Has note: ${options.hasNote ? 'Yes' : 'No'}`);
+  if (options.isRepeating !== undefined) conditions.push(`Repeating: ${options.isRepeating ? 'Yes' : 'No'}`);
+  if (options.estimatedMinutes) conditions.push(`Estimate: ${describeEstimate(options.estimatedMinutes)}`);
+
+  if (options.addedBefore) conditions.push(`Added before: ${options.addedBefore}`);
+  if (options.addedAfter) conditions.push(`Added after: ${options.addedAfter}`);
+  if (options.modifiedBefore) conditions.push(`Modified before: ${options.modifiedBefore}`);
+  if (options.modifiedAfter) conditions.push(`Modified after: ${options.modifiedAfter}`);
+  if (options.droppedBefore) conditions.push(`Dropped before: ${options.droppedBefore}`);
+  if (options.droppedAfter) conditions.push(`Dropped after: ${options.droppedAfter}`);
+
+  if (options.and && options.and.length > 0) conditions.push(`AND clauses: ${options.and.length}`);
+  if (options.or && options.or.length > 0) conditions.push(`OR clauses: ${options.or.length}`);
+  if (options.not) conditions.push('NOT clause: 1');
+
   return conditions.length > 0 ? conditions.join(' | ') : '';
+}
+
+function describeEstimate(estimate: EstimatedMinutesFilter): string {
+  const parts: string[] = [];
+  if (estimate.lessThan !== undefined) parts.push(`< ${estimate.lessThan}m`);
+  if (estimate.greaterThan !== undefined) parts.push(`> ${estimate.greaterThan}m`);
+  if (estimate.equals !== undefined) parts.push(`= ${estimate.equals}m`);
+  if (estimate.between) parts.push(`${estimate.between[0]}–${estimate.between[1]}m`);
+  return parts.length > 0 ? parts.join(', ') : 'any';
 }
 
 // Group tasks by project
@@ -572,8 +836,9 @@ function groupTasksByProject(tasks: any[]): Map<string, any[]> {
   return grouped;
 }
 
-// Format a single task
-function formatTask(task: any): string {
+// Format a single task. `fields` gates the OPTIONAL line components only — the
+// status glyph, the name and the id always render.
+function formatTask(task: any, fields: FieldFlags = EVERY_FIELD): string {
   let output = '';
 
   // Task basic info
@@ -585,32 +850,34 @@ function formatTask(task: any): string {
 
   // Date info
   const dateInfo: string[] = [];
-  if (task.dueDate) {
-    const dueDateStr = new Date(task.dueDate).toLocaleDateString();
-    const isOverdue = new Date(task.dueDate) < new Date();
-    dateInfo.push(isOverdue ? `⚠️ DUE: ${dueDateStr}` : `📅 DUE: ${dueDateStr}`);
-  } else if (task.effectiveDueDate) {
-    const effDueDateStr = new Date(task.effectiveDueDate).toLocaleDateString();
-    const isOverdue = new Date(task.effectiveDueDate) < new Date();
-    dateInfo.push(isOverdue ? `⚠️ DUE (eff): ${effDueDateStr}` : `📅 DUE (eff): ${effDueDateStr}`);
-  }
+  if (fields.dates) {
+    if (task.dueDate) {
+      const dueDateStr = new Date(task.dueDate).toLocaleDateString();
+      const isOverdue = new Date(task.dueDate) < new Date();
+      dateInfo.push(isOverdue ? `⚠️ DUE: ${dueDateStr}` : `📅 DUE: ${dueDateStr}`);
+    } else if (task.effectiveDueDate) {
+      const effDueDateStr = new Date(task.effectiveDueDate).toLocaleDateString();
+      const isOverdue = new Date(task.effectiveDueDate) < new Date();
+      dateInfo.push(isOverdue ? `⚠️ DUE (eff): ${effDueDateStr}` : `📅 DUE (eff): ${effDueDateStr}`);
+    }
 
-  if (task.deferDate) {
-    const deferDateStr = new Date(task.deferDate).toLocaleDateString();
-    dateInfo.push(`🚀 DEFER: ${deferDateStr}`);
-  } else if (task.effectiveDeferDate) {
-    const effDeferDateStr = new Date(task.effectiveDeferDate).toLocaleDateString();
-    dateInfo.push(`🚀 DEFER (eff): ${effDeferDateStr}`);
-  }
+    if (task.deferDate) {
+      const deferDateStr = new Date(task.deferDate).toLocaleDateString();
+      dateInfo.push(`🚀 DEFER: ${deferDateStr}`);
+    } else if (task.effectiveDeferDate) {
+      const effDeferDateStr = new Date(task.effectiveDeferDate).toLocaleDateString();
+      dateInfo.push(`🚀 DEFER (eff): ${effDeferDateStr}`);
+    }
 
-  if (task.plannedDate) {
-    const plannedDateStr = new Date(task.plannedDate).toLocaleDateString();
-    dateInfo.push(`🗓 PLAN: ${plannedDateStr}`);
-  }
+    if (task.plannedDate) {
+      const plannedDateStr = new Date(task.plannedDate).toLocaleDateString();
+      dateInfo.push(`🗓 PLAN: ${plannedDateStr}`);
+    }
 
-  if (task.completedDate) {
-    const completedDateStr = new Date(task.completedDate).toLocaleDateString();
-    dateInfo.push(`✅ DONE: ${completedDateStr}`);
+    if (task.completedDate) {
+      const completedDateStr = new Date(task.completedDate).toLocaleDateString();
+      dateInfo.push(`✅ DONE: ${completedDateStr}`);
+    }
   }
 
   if (dateInfo.length > 0) {
@@ -620,11 +887,11 @@ function formatTask(task: any): string {
   // Additional info
   const additionalInfo: string[] = [];
 
-  if (task.taskStatus && task.taskStatus !== 'Available') {
+  if (fields.status && task.taskStatus && task.taskStatus !== 'Available') {
     additionalInfo.push(task.taskStatus);
   }
 
-  if (task.estimatedMinutes) {
+  if (fields.estimate && task.estimatedMinutes) {
     const hours = Math.floor(task.estimatedMinutes / 60);
     const minutes = task.estimatedMinutes % 60;
     if (hours > 0) {
@@ -641,12 +908,12 @@ function formatTask(task: any): string {
   output += '\n';
 
   // Task notes
-  if (task.note && task.note.trim()) {
+  if (fields.note && task.note && task.note.trim()) {
     output += `  📝 ${task.note.trim()}\n`;
   }
 
   // Tags
-  if (task.tags && task.tags.length > 0) {
+  if (fields.tags && task.tags && task.tags.length > 0) {
     const tagNames = task.tags.map((tag: any) => tag.name).join(', ');
     output += `  🏷 ${tagNames}\n`;
   }
@@ -668,3 +935,5 @@ function getStatusEmoji(status: string): string {
 
   return statusMap[status] || '⚪';
 }
+
+export const FILTER_TASK_FIELDS = ALL_FIELDS;

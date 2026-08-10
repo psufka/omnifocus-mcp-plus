@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { batchMoveTasks } from '../primitives/batchMoveTasks.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type { BatchPlacement } from '../../utils/batchResults.js';
 
 export const schema = z.object({
   tasks: z.array(z.object({
@@ -11,8 +12,20 @@ export const schema = z.object({
   targetProjectName: z.string().optional().describe("Destination project name"),
   targetParentTaskId: z.string().optional().describe("Destination parent task ID"),
   targetParentTaskName: z.string().optional().describe("Destination parent task name"),
-  targetInbox: z.boolean().optional().describe("Move tasks to inbox")
+  targetInbox: z.boolean().optional().describe("Move tasks to inbox"),
+  dryRun: z.boolean().optional().describe("Resolve the destination and every task exactly as a real move would and report what WOULD move (including each task's current container), without moving anything. Default false.")
 }).strict();
+
+function describePlacement(placement?: BatchPlacement): string {
+  if (!placement) return 'an unknown location';
+  if (placement.kind === 'inbox') return 'inbox';
+  if (placement.kind === 'library') return 'library top level';
+  const label = placement.name ? `"${placement.name}"` : (placement.id ?? '(unnamed)');
+  if (placement.kind === 'parentTask') return `parent task ${label}`;
+  if (placement.kind === 'project') return `project ${label}`;
+  if (placement.kind === 'folder') return `folder ${label}`;
+  return `${placement.kind} ${label}`;
+}
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
@@ -28,18 +41,29 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       };
     }
 
-    let output = `# Batch Move Results\n\n`;
     const succeeded = result.results.filter(r => r.success).length;
     const failed = result.results.filter(r => !r.success).length;
-    output += `Moved ${succeeded}/${result.results.length} tasks`;
+
+    let output = result.dryRun ? `# Batch Move Results (dry run)\n\n` : `# Batch Move Results\n\n`;
+    output += result.dryRun
+      ? `🔍 Nothing was moved. ${succeeded}/${result.results.length} tasks would move`
+      : `Moved ${succeeded}/${result.results.length} tasks`;
     if (failed > 0) output += ` (${failed} failed)`;
+    if (!result.dryRun && succeeded > 0 && result.verified === false) {
+      output += ` ⚠️ destination could not be verified for every task`;
+    }
     output += '\n\n';
 
     for (const r of result.results) {
-      if (r.success) {
-        output += `✅ ${r.name || r.id}\n`;
+      const label = r.name || r.id || `task ${r.index}`;
+      if (r.success && result.dryRun) {
+        output += `➡️ ${label}: ${describePlacement(r.wouldMove?.from)} → ${describePlacement(r.wouldMove?.to)}\n`;
+      } else if (r.success && r.verified === false) {
+        output += `⚠️ ${label}: moved, but destination NOT verified — ${r.warning || 'unknown mismatch'}\n`;
+      } else if (r.success) {
+        output += `✅ ${label}\n`;
       } else {
-        output += `❌ ${r.name || r.id || `task ${r.index}`}: ${r.error || 'unknown error'}\n`;
+        output += `❌ ${label}: ${r.error || 'unknown error'}\n`;
       }
     }
 

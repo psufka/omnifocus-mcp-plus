@@ -53,6 +53,31 @@ test('uncompleteTask reads the status name from the enum string, not the absent 
   assert.match(src, /function __statusName\(status\)/, 'missing __statusName helper');
 });
 
+// --- Post-write read-back verification (v0.5.0) ---------------------------
+
+test('completeTask reads the task back and reports whether the write landed', () => {
+  const src = readPrimitive('completeTask.ts');
+  assert.match(src, /const completed = \(task\.taskStatus === Task\.Status\.Completed\) \|\| task\.completed === true/, 'completion is not read back');
+  assert.match(src, /verified: true/, 'successful completion does not report verified');
+  assert.match(src, /markComplete\(\) did not take effect/, 'a silent no-op completion is not reported as a failure');
+  assert.match(src, /success: false,[\s\S]{0,200}verified: false/, 'an unverified completion must not report success');
+});
+
+test('completeTask treats a repeating task as verified via its new occurrence', () => {
+  const src = readPrimitive('completeTask.ts');
+  // markComplete() on a repeating task completes this occurrence and returns
+  // the NEW task, so the original may not read as Completed.
+  assert.match(src, /produced = task\.markComplete\(\)/, 'markComplete result is discarded');
+  assert.match(src, /nextOccurrenceId/, 'the new occurrence id is not captured');
+  assert.match(src, /const verified = completed \|\| nextOccurrenceId !== null/, 'a repeating completion would read as unverified');
+});
+
+test('complete_task handler surfaces the next occurrence of a repeating task', () => {
+  const def = readFileSync(join(here, 'completeTask.ts'), 'utf8');
+  assert.match(def, /result\.nextOccurrenceId/, 'handler hides the new occurrence');
+  assert.match(def, /next occurrence created/, 'handler does not explain the repeat');
+});
+
 test('complete/uncomplete handlers report the no-change case distinctly', () => {
   const completeDef = readFileSync(join(here, 'completeTask.ts'), 'utf8');
   const uncompleteDef = readFileSync(join(here, 'uncompleteTask.ts'), 'utf8');

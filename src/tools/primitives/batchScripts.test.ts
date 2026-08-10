@@ -66,6 +66,60 @@ for (const name of BATCH_PRIMITIVES) {
   });
 }
 
+// --- dryRun: the write must be gated, not scattered ---
+//
+// batchScriptBehavior.test.ts executes these scripts against a fake OmniFocus
+// and asserts nothing is written. These source-level guards are the cheaper
+// backstop: they fail the moment a new write lands outside the guarded block.
+
+const WRITE_CALLS: Record<string, RegExp[]> = {
+  'batchAddItems.ts': [/__createTask\(item,/, /__createProject\(item,/],
+  'batchRemoveItems.ts': [/deleteObject\(found\)/],
+  'batchMoveTasks.ts': [/moveTasks\(\[task\], location\)/]
+};
+
+for (const name of BATCH_PRIMITIVES) {
+  test(`${name} reads a dryRun flag off the injected args`, () => {
+    const src = readPrimitive(name);
+    assert.match(src, /const dryRun = args\.dryRun === true;/, `${name} script does not accept dryRun`);
+  });
+
+  test(`${name} performs every write AFTER the dryRun guard`, () => {
+    const src = readPrimitive(name);
+    const scriptStart = src.search(/export const [A-Z_]+_SCRIPT = `/);
+    const script = src.slice(scriptStart);
+    const guard = script.indexOf('if (dryRun) {');
+    assert.ok(guard > 0, `${name} script has no dryRun guard block`);
+
+    for (const write of WRITE_CALLS[name]) {
+      const at = script.search(write);
+      assert.ok(at > 0, `${name} script no longer contains its expected write ${write}`);
+      assert.ok(
+        at > guard,
+        `${name} writes via ${write} before the dryRun guard — a dry run would mutate the database`
+      );
+    }
+  });
+}
+
+test('batchAddItems rolls back in reverse creation order, inside the same script', () => {
+  const src = readPrimitive('batchAddItems.ts');
+  assert.match(src, /for \(let r = created\.length - 1; r >= 0; r--\)/, 'rollback must walk the creation ledger backwards');
+  assert.match(src, /deleteObject\(created\[r\]\.obj\)/, 'rollback must use deleteObject');
+  // A second runOmniJs call would race background sync between the failure and
+  // the cleanup, so the rollback has to live in the same script as the writes.
+  const scriptStart = src.search(/export const [A-Z_]+_SCRIPT = `/);
+  const scriptEnd = src.indexOf('export async function batchAddItems');
+  assert.ok(src.slice(scriptStart, scriptEnd).includes('deleteObject(created[r].obj)'), 'rollback escaped the OmniJS script');
+});
+
+test('every batch script verifies its write by reading the database back', () => {
+  assert.match(readPrimitive('batchAddItems.ts'), /__verifyTaskPlacement\(|__verifyProjectPlacement\(/);
+  // A removal is verified by the id no longer resolving.
+  assert.match(readPrimitive('batchRemoveItems.ts'), /__findById\(afterCollection, foundId, item\.itemType\)/);
+  assert.match(readPrimitive('batchMoveTasks.ts'), /__verifyTaskPlacement\(task, destination\)/);
+});
+
 test('batchRemoveItems uses the strict shared lookup helper', () => {
   const src = readPrimitive('batchRemoveItems.ts');
   assert.match(src, /OMNIJS_LOOKUP_HELPERS/);

@@ -1,6 +1,6 @@
 # OmniFocus MCP Plus
 
-A comprehensive MCP server for OmniFocus 4 with 42 tools covering task management, project/folder/tag CRUD, custom perspectives, notifications, and advanced filtering.
+A comprehensive MCP server for OmniFocus 4 with 50 tools covering task management, project/folder/tag CRUD, GTD review workflow, analytics, custom perspectives (including rule editing), attachments, notifications, and advanced filtering — plus MCP prompts, resources, tool annotations, and a Claude Code skill.
 
 Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
@@ -20,7 +20,7 @@ claude mcp add omnifocus -- node "$(pwd)/dist/server.js"
 
 Restart Claude Code to pick up the new server.
 
-## Tools (42)
+## Tools (50)
 
 ### Task Management
 | Tool | Description |
@@ -34,17 +34,22 @@ Restart Claude Code to pick up the new server.
 | `list_subtasks` | List children (subtasks), optionally recursive for full hierarchy |
 | `complete_task` | Mark a task as completed |
 | `uncomplete_task` | Mark a completed task as incomplete |
-| `set_task_repetition` | Set/clear repeating schedule (iCal RRULE syntax) |
+| `set_task_repetition` | Set/clear repeating schedule — structured fields ("2nd Tuesday monthly") or raw iCal RRULE |
 | `append_to_note` | Append text to a task or project note |
-| `batch_add_items` | Add multiple tasks/projects in one call |
-| `batch_remove_items` | Remove multiple items in one call |
-| `batch_move_tasks` | Move multiple tasks to a destination in one call |
+| `batch_add_items` | Add multiple tasks/projects in one call — tempId hierarchy, dryRun, atomic rollback |
+| `batch_remove_items` | Remove multiple items in one call (dryRun supported) |
+| `batch_move_tasks` | Move multiple tasks to a destination in one call (dryRun supported) |
 | `reorder_task` | Reorder task within its container: before/after sibling, or beginning/ending |
+| `convert_task_to_project` | Promote a task (with subtasks, tags, note) into a project |
+| `find_similar_tasks` | Duplicate detection before create — ranked similarity matches with ids |
+| `manage_attachments` | List/read/add/remove file attachments on a task or project |
 
 ### Task Queries
 | Tool | Description |
 |------|-------------|
-| `filter_tasks` | Advanced filtering: status, dates, projects, tags (AND/OR), search |
+| `filter_tasks` | Advanced filtering: status, all date fields, folder tree, tags, regex, and/or/not clauses, countOnly, paging |
+| `search_items` | One search across tasks, projects, folders, and tags |
+| `analyze` | Evidence-only analytics: health snapshot, velocity, overdue clusters, stalled projects |
 | `get_inbox_tasks` | Get inbox tasks |
 | `get_flagged_tasks` | Get flagged tasks with optional project filter |
 | `get_forecast_tasks` | Get due/deferred tasks in date range |
@@ -52,7 +57,8 @@ Restart Claude Code to pick up the new server.
 | `get_today_completed_tasks` | Get tasks completed today |
 | `get_task_counts` | Aggregate counts: total, available, completed, overdue, due soon, flagged |
 | `get_custom_perspective_tasks` | Get tasks from a custom perspective |
-| `list_custom_perspectives` | List all custom perspectives |
+| `list_custom_perspectives` | List all custom perspectives (includeRules returns their filter rules) |
+| `update_perspective_rules` | Edit a custom perspective's filter rules — validated, read-back verified, undo-able |
 | `dump_database` | Full database export |
 
 ### Notifications
@@ -69,6 +75,12 @@ Restart Claude Code to pick up the new server.
 | `list_projects` | List/filter projects by folder, status, stalled state |
 | `search_projects` | Search projects by name |
 | `get_project_counts` | Aggregate counts by status |
+| `manage_reviews` | GTD review workflow: list due, mark reviewed (batch-capable), set schedule |
+
+### App Control
+| Tool | Description |
+|------|-------------|
+| `app_control` | Sync, undo/redo (confirm-gated), window focus get/set/clear, reveal an item |
 
 ### Folders
 | Tool | Description |
@@ -87,6 +99,12 @@ Restart Claude Code to pick up the new server.
 | `create_tag` | Create a tag, optionally nested |
 | `update_tag` | Update tag name or status |
 | `delete_tag` | Delete a tag |
+
+## MCP Surface & Environment
+
+Beyond tools, the server exposes **4 prompts** (`weekly_review`, `inbox_processing`, `daily_planning`, `task_health_scan` — surfaced as slash commands in Claude Code), **4 resources** (`omnifocus://inbox`, `today`, `flagged`, `stats`), **tool annotations** (readOnly/destructive/idempotent hints on all 50 tools), and **handshake instructions** that steer clients toward the cheap tools. A Claude Code skill lives at `docs/skills/omnifocus/` (install: `ln -s "$(pwd)/docs/skills/omnifocus" ~/.claude/skills/omnifocus`).
+
+Environment variables: `OMNIFOCUS_MCP_MAX_CONCURRENT` (concurrent osascript processes, default 2, range 1–8 — OmniFocus serializes Apple Events on one thread), `OMNIFOCUS_SCRIPT_TIMEOUT_MS` (default 120000), `OMNIFOCUS_SCRIPT_MAX_OUTPUT_BYTES` (default 50MB).
 
 ## Usage Examples
 

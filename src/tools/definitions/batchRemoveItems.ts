@@ -7,7 +7,8 @@ export const schema = z.object({
     id: z.string().optional().describe("The ID of the task or project to remove"),
     name: z.string().optional().describe("The name of the task or project to remove (used only when no ID is given; an ID that matches nothing is an error and never falls back to the name)"),
     itemType: z.enum(['task', 'project']).describe("Type of item to remove ('task' or 'project')")
-  }).strict()).describe("Array of items (tasks or projects) to remove")
+  }).strict()).describe("Array of items (tasks or projects) to remove"),
+  dryRun: z.boolean().optional().describe("Resolve every item exactly as a real removal would and report what WOULD be deleted, without deleting anything. Default false.")
 }).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
@@ -26,7 +27,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     }
 
     // Call the batchRemoveItems function
-    const result = await batchRemoveItems(args.items as BatchRemoveItemsParams[]);
+    const result = await batchRemoveItems(args.items as BatchRemoveItemsParams[], { dryRun: args.dryRun });
 
     // Nothing was attempted (e.g. empty items array) — no per-item detail exists.
     if (result.results.length === 0) {
@@ -42,22 +43,31 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const successCount = result.results.filter(r => r.success).length;
     const failureCount = result.results.length - successCount;
 
-    let message = successCount > 0
-      ? `✅ Successfully removed ${successCount} items.`
-      : `❌ Failed to remove all ${result.results.length} items.`;
+    let message: string;
+    if (result.dryRun) {
+      message = `🔍 Dry run — nothing was deleted. ${successCount}/${result.results.length} items would be removed.`;
+      if (failureCount > 0) message += ` ⚠️ ${failureCount} could not be resolved.`;
+    } else {
+      message = successCount > 0
+        ? `✅ Successfully removed ${successCount} items.`
+        : `❌ Failed to remove all ${result.results.length} items.`;
 
-    if (successCount > 0 && failureCount > 0) {
-      message += ` ⚠️ Failed to remove ${failureCount} items.`;
+      if (successCount > 0 && failureCount > 0) {
+        message += ` ⚠️ Failed to remove ${failureCount} items.`;
+      }
     }
 
     // Per-item outcome, always — including when every item failed.
     const details = result.results.map((item, i) => {
       const source = args.items[item.index ?? i];
       const itemType = source?.itemType ?? 'item';
+      const identifier = item.id || item.name || source?.id || source?.name || `item ${item.index ?? i}`;
+      if (item.success && result.dryRun) {
+        return `- 🗑️ would remove ${itemType}: "${item.wouldRemove?.name ?? item.name}" (id: ${item.wouldRemove?.id ?? item.id})`;
+      }
       if (item.success) {
         return `- ✅ ${itemType}: "${item.name}"`;
       }
-      const identifier = item.id || item.name || source?.id || source?.name || `item ${item.index ?? i}`;
       return `- ❌ ${itemType}: ${identifier} - Error: ${item.error || 'unknown error'}`;
     }).join('\n');
 

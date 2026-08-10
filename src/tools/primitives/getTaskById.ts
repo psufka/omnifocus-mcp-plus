@@ -1,4 +1,5 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 
 export interface GetTaskByIdParams {
   taskId?: string;
@@ -34,17 +35,16 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
   }
 
   const script = `
-    let task;
-    if (args.taskId) {
-      task = flattenedTasks.filter(t => t.id.primaryKey === args.taskId)[0];
-    } else {
-      const matches = flattenedTasks.filter(t => t.name === args.taskName);
-      if (matches.length > 1) {
-        return JSON.stringify({ success: false, error: 'Ambiguous task name: ' + args.taskName + '. Multiple matches found; please use taskId.' });
-      }
-      task = matches[0];
+    ${OMNIJS_LOOKUP_HELPERS}
+
+    // Shared strict lookup: byIdentifier fast path, a stale ID is an error that
+    // never falls back to the name, an ambiguous name lists every match, and a
+    // name matching one active plus stale copies resolves to the active one.
+    const lookup = __resolveByIdOrName(flattenedTasks, args.taskId || null, args.taskName || null, 'Task');
+    if (lookup.error) {
+      return JSON.stringify({ success: false, error: lookup.error });
     }
-    if (!task) return JSON.stringify({ success: false, error: 'Task not found' });
+    const task = lookup.item;
 
     const parent = task.parent;
     const isParentTask = parent && parent.constructor === Task;

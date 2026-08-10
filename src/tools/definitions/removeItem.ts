@@ -39,13 +39,14 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const result = await removeItem(args as RemoveItemParams);
     
     if (result.success) {
-      // Item was removed successfully
+      // Item was removed successfully AND the read-back inside the same script
+      // confirmed the id no longer resolves.
       const itemTypeLabel = args.itemType === 'task' ? 'Task' : 'Project';
-      
+
       return {
         content: [{
           type: "text" as const,
-          text: `✅ ${itemTypeLabel} "${result.name}" removed successfully.`
+          text: `✅ ${itemTypeLabel} "${result.name}" removed successfully (deletion verified).`
         }]
       };
     } else {

@@ -1,6 +1,6 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
 import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
-import { BatchItemResult, coerceBatchResults, summarizeBatchErrors } from '../../utils/batchResults.js';
+import { BatchItemResult, allVerified, coerceBatchResults, summarizeBatchErrors } from '../../utils/batchResults.js';
 
 // Define the parameters for the batch removal operation
 // (same shape as remove_item's params, declared here so the batch tool does not
@@ -11,6 +11,12 @@ export type BatchRemoveItemsParams = {
   itemType: 'task' | 'project';
 };
 
+/** Batch-wide options. */
+export type BatchRemoveItemsOptions = {
+  /** Resolve every item, delete nothing. */
+  dryRun?: boolean;
+};
+
 // Define the result type for individual operations
 export type ItemResult = BatchItemResult;
 
@@ -19,6 +25,10 @@ type BatchResult = {
   success: boolean;
   results: ItemResult[];
   error?: string;
+  /** true when nothing was deleted (dryRun). */
+  dryRun?: boolean;
+  /** Every deleted id was confirmed unresolvable afterwards. */
+  verified?: boolean;
 };
 
 type PreparedItem = BatchRemoveItemsParams & { preflightError?: string };
@@ -36,17 +46,20 @@ export function prepareRemoveItems(items: BatchRemoveItemsParams[]): PreparedIte
 }
 
 // One static script for the whole batch — every user value arrives through the
-// injected `args.items` array.
+// injected `args` object. Resolution is identical in a dry run and a real run;
+// the delete itself is one guarded block, and every delete is verified by
+// re-resolving the id (a hit means the object survived).
 export const BATCH_REMOVE_ITEMS_SCRIPT = `
     ${OMNIJS_LOOKUP_HELPERS}
 
+    const dryRun = args.dryRun === true;
     const results = [];
 
     for (let i = 0; i < args.items.length; i++) {
       const item = args.items[i];
       try {
         if (item.preflightError) {
-          results.push({ index: i, success: false, id: item.id, name: item.name, error: item.preflightError });
+          results.push({ index: i, success: false, status: 'failed', id: item.id, name: item.name, error: item.preflightError });
           continue;
         }
 
@@ -55,20 +68,52 @@ export const BATCH_REMOVE_ITEMS_SCRIPT = `
         const collection = item.itemType === 'task' ? flattenedTasks : flattenedProjects;
         const lookup = __resolveByIdOrName(collection, item.id, item.name, item.itemType);
         if (lookup.error) {
-          results.push({ index: i, success: false, id: item.id, name: item.name, error: lookup.error });
+          results.push({ index: i, success: false, status: 'failed', id: item.id, name: item.name, error: lookup.error });
           continue;
         }
 
         const found = lookup.item;
         const foundId = found.id.primaryKey;
         const foundName = found.name;
+
+        if (dryRun) {
+          results.push({
+            index: i,
+            success: true,
+            status: 'planned',
+            id: foundId,
+            name: foundName,
+            wouldRemove: { itemType: item.itemType, id: foundId, name: foundName }
+          });
+          continue;
+        }
+
         deleteObject(found);
 
-        results.push({ index: i, success: true, id: foundId, name: foundName });
+        // Verify in this same script: the id must no longer resolve. __findById
+        // checks membership in the freshly read collection, so a zombie object
+        // returned by byIdentifier still counts as gone.
+        const afterCollection = item.itemType === 'task' ? flattenedTasks : flattenedProjects;
+        const stillThere = __findById(afterCollection, foundId, item.itemType);
+        if (stillThere) {
+          results.push({
+            index: i,
+            success: false,
+            status: 'failed',
+            id: foundId,
+            name: foundName,
+            verified: false,
+            error: 'Delete was not verified: ' + item.itemType + ' ' + foundId + ' still resolves after deleteObject.'
+          });
+          continue;
+        }
+
+        results.push({ index: i, success: true, status: 'ok', id: foundId, name: foundName, verified: true });
       } catch (e) {
         results.push({
           index: i,
           success: false,
+          status: 'failed',
           id: item.id,
           name: item.name,
           error: (e && e.message) ? e.message : 'Unknown error removing item'
@@ -76,7 +121,7 @@ export const BATCH_REMOVE_ITEMS_SCRIPT = `
       }
     }
 
-    return JSON.stringify({ success: true, results: results });
+    return JSON.stringify({ success: true, dryRun: dryRun, results: results });
 `;
 
 /**
@@ -86,26 +131,36 @@ export const BATCH_REMOVE_ITEMS_SCRIPT = `
  * single OmniFocus round-trip and one bad item never aborts the rest. Lookup
  * uses the shared strict helper: an explicit ID that matches nothing is an
  * error (never a name fallback), and an ambiguous name is an error.
+ *
+ * With `dryRun`, every item is resolved exactly as it would be for a real
+ * delete and reported as `wouldRemove` — nothing is deleted.
  */
-export async function batchRemoveItems(items: BatchRemoveItemsParams[]): Promise<BatchResult> {
+export async function batchRemoveItems(items: BatchRemoveItemsParams[], options?: BatchRemoveItemsOptions): Promise<BatchResult> {
   if (!items || items.length === 0) {
     return { success: false, results: [], error: 'At least one item must be provided.' };
   }
 
+  const dryRun = options?.dryRun === true;
   const prepared = prepareRemoveItems(items);
 
   try {
-    const raw = await runOmniJs(BATCH_REMOVE_ITEMS_SCRIPT, { items: prepared });
+    const raw = await runOmniJs(
+      BATCH_REMOVE_ITEMS_SCRIPT,
+      { items: prepared, dryRun },
+      dryRun ? { readOnly: true } : undefined
+    );
     const results = coerceBatchResults(raw, items.length, 'batch_remove_items script returned no results');
     const success = results.some(r => r.success);
     return {
       success,
       results,
-      error: success ? undefined : summarizeBatchErrors(results, 'removed')
+      error: success ? undefined : summarizeBatchErrors(results, dryRun ? 'planned' : 'removed'),
+      dryRun,
+      verified: dryRun ? undefined : allVerified(results)
     };
   } catch (error: any) {
     const message = error?.message || 'Unknown error in batchRemoveItems';
     const results = coerceBatchResults(null, items.length, message);
-    return { success: false, results, error: summarizeBatchErrors(results, 'removed') };
+    return { success: false, results, error: summarizeBatchErrors(results, 'removed'), dryRun };
   }
 }

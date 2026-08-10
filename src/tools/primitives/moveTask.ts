@@ -1,4 +1,4 @@
-import { editItem, EditItemParams } from './editItem.js';
+import { editItem, EditItemParams, EditItemMismatch } from './editItem.js';
 
 export interface MoveTaskParams {
   id?: string;
@@ -61,13 +61,33 @@ export function buildMoveTaskEditParams(params: MoveTaskParams): EditItemParams 
   };
 }
 
-export async function moveTask(params: MoveTaskParams): Promise<{
+/**
+ * A move is only a success if the task read back inside the destination.
+ *
+ * `verified` / `mismatches` come straight from editItem's post-write read-back
+ * and MUST be passed through: dropping them here is what let move_task report
+ * "moved successfully" for a task that never left its old container.
+ */
+export interface MoveTaskResult {
   success: boolean;
   id?: string;
   name?: string;
   changedProperties?: string;
+  /** false = the write was applied but the task is not in the requested container. */
+  verified?: boolean;
+  mismatches?: EditItemMismatch[];
   error?: string;
-}> {
+}
+
+/** Test-only seam: production always uses the real primitive. */
+export interface MoveTaskDeps {
+  editItem: typeof editItem;
+}
+
+export async function moveTask(
+  params: MoveTaskParams,
+  deps: MoveTaskDeps = { editItem }
+): Promise<MoveTaskResult> {
   const validation = validateMoveTaskParams(params);
   if (!validation.valid) {
     return {
@@ -76,5 +96,15 @@ export async function moveTask(params: MoveTaskParams): Promise<{
     };
   }
 
-  return editItem(buildMoveTaskEditParams(params));
+  const result = await deps.editItem(buildMoveTaskEditParams(params));
+
+  return {
+    success: result.success,
+    id: result.id,
+    name: result.name,
+    changedProperties: result.changedProperties,
+    verified: result.verified,
+    mismatches: result.mismatches,
+    error: result.error
+  };
 }

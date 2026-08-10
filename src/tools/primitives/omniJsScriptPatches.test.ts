@@ -15,10 +15,25 @@ function readPrimitive(name: string): string {
   return readFileSync(join(here, name), 'utf8');
 }
 
-test('getTaskById primitive contains ambiguity-check pattern (Bug 1 / v0.3.3)', () => {
+// The ambiguity guard from Bug 1 / v0.3.3 now lives in the shared lookup
+// helpers (v0.5.0): get_task_by_id delegates to __resolveByIdOrName instead of
+// duplicating the scan, so the guarantee is asserted at both ends.
+test('getTaskById primitive resolves through the shared strict lookup helper', () => {
   const src = readPrimitive('getTaskById.ts');
-  assert.match(src, /matches\.length > 1/, 'getTaskById missing matches.length ambiguity check');
-  assert.match(src, /Ambiguous task name/, 'getTaskById missing ambiguity error message');
+  assert.match(src, /OMNIJS_LOOKUP_HELPERS/, 'getTaskById does not prepend the shared lookup helpers');
+  assert.match(
+    src,
+    /__resolveByIdOrName\(flattenedTasks, args\.taskId \|\| null, args\.taskName \|\| null, 'Task'\)/,
+    'getTaskById does not use __resolveByIdOrName'
+  );
+  assert.doesNotMatch(src, /flattenedTasks\.filter\(t => t\.id\.primaryKey === args\.taskId\)/, 'getTaskById still hand-rolls its ID scan');
+  assert.doesNotMatch(src, /error: 'Task not found' \}/, 'getTaskById still returns the bare "Task not found" message');
+});
+
+test('shared lookup helper still guards ambiguous names (Bug 1 / v0.3.3)', () => {
+  const helpers = readFileSync(join(here, '..', '..', 'utils', 'omniJsHelpers.ts'), 'utf8');
+  assert.match(helpers, /matches\.length > 1/, 'shared helper missing matches.length ambiguity check');
+  assert.match(helpers, /Ambiguous ' \+ label \+ ' name/, 'shared helper missing ambiguity error message');
 });
 
 test('editItem primitive errors instead of auto-creating missing folders (Bug 3 / v0.3.3)', () => {

@@ -1,6 +1,7 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
 import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
-import { BatchItemResult, coerceBatchResults, summarizeBatchErrors } from '../../utils/batchResults.js';
+import { OMNIJS_PLACEMENT_HELPERS } from './addOmniFocusTask.js';
+import { BatchItemResult, allVerified, coerceBatchResults, summarizeBatchErrors } from '../../utils/batchResults.js';
 
 export interface BatchMoveTasksParams {
   tasks: Array<{ id?: string; name?: string }>;
@@ -9,6 +10,8 @@ export interface BatchMoveTasksParams {
   targetParentTaskId?: string;
   targetParentTaskName?: string;
   targetInbox?: boolean;
+  /** Resolve every task and the destination, move nothing. */
+  dryRun?: boolean;
 }
 
 type MoveResult = BatchItemResult;
@@ -17,6 +20,10 @@ type BatchMoveResult = {
   success: boolean;
   results: MoveResult[];
   error?: string;
+  /** true when nothing was moved (dryRun). */
+  dryRun?: boolean;
+  /** Every moved task was read back and confirmed in the destination. */
+  verified?: boolean;
 };
 
 /** Destination validation — shared by the primitive and its tests. */
@@ -47,9 +54,14 @@ export function validateBatchMoveParams(params: BatchMoveTasksParams): { valid: 
 }
 
 // One static script for the whole batch — every user value arrives through the
-// injected `args` object.
+// injected `args` object. The destination is resolved once; each task is then
+// resolved, moved inside a single guarded block (skipped entirely on a dry run)
+// and read back to confirm it actually landed in the destination.
 export const BATCH_MOVE_TASKS_SCRIPT = `
     ${OMNIJS_LOOKUP_HELPERS}
+    ${OMNIJS_PLACEMENT_HELPERS}
+
+    const dryRun = args.dryRun === true;
 
     // --- Resolve the shared destination once ---
     let destParent = null;
@@ -70,19 +82,27 @@ export const BATCH_MOVE_TASKS_SCRIPT = `
       destParent = parentLookup.item;
     }
 
+    // The destination as a placement, so the same comparison used after an add
+    // can verify a move.
+    const destination = destInbox
+      ? { kind: 'inbox', id: null, name: null }
+      : (destParent
+        ? { kind: 'parentTask', id: destParent.id.primaryKey, name: destParent.name }
+        : { kind: 'project', id: destProject.id.primaryKey, name: destProject.name });
+
     const results = [];
 
     for (let i = 0; i < args.tasks.length; i++) {
       const spec = args.tasks[i];
       try {
         if (!spec.id && !spec.name) {
-          results.push({ index: i, success: false, error: 'Either id or name must be provided to move a task.' });
+          results.push({ index: i, success: false, status: 'failed', error: 'Either id or name must be provided to move a task.' });
           continue;
         }
 
         const lookup = __resolveByIdOrName(flattenedTasks, spec.id, spec.name, 'task');
         if (lookup.error) {
-          results.push({ index: i, success: false, id: spec.id, name: spec.name, error: lookup.error });
+          results.push({ index: i, success: false, status: 'failed', id: spec.id, name: spec.name, error: lookup.error });
           continue;
         }
 
@@ -101,19 +121,54 @@ export const BATCH_MOVE_TASKS_SCRIPT = `
             cursor = (up && up.constructor === Task) ? up : null;
           }
           if (cycle) {
-            results.push({ index: i, success: false, id: taskId, name: taskName, error: 'Invalid move target: cannot move a task into itself or its descendants.' });
+            results.push({ index: i, success: false, status: 'failed', id: taskId, name: taskName, error: 'Invalid move target: cannot move a task into itself or its descendants.' });
             continue;
           }
+        }
+
+        if (dryRun) {
+          results.push({
+            index: i,
+            success: true,
+            status: 'planned',
+            id: taskId,
+            name: taskName,
+            wouldMove: {
+              id: taskId,
+              name: taskName,
+              from: __publicPlacement(__actualTaskPlacement(task)),
+              to: __publicPlacement(destination)
+            }
+          });
+          continue;
         }
 
         const location = destInbox ? inbox.ending : (destParent ? destParent.ending : destProject.ending);
         moveTasks([task], location);
 
-        results.push({ index: i, success: true, id: taskId, name: taskName });
+        // Verify in this same script: read the task back and confirm its
+        // container is the destination, not wherever it happened to land.
+        const check = __verifyTaskPlacement(task, destination);
+        if (!check.exists) {
+          results.push({ index: i, success: false, status: 'failed', id: taskId, name: taskName, verified: false, error: check.warning });
+          continue;
+        }
+
+        results.push({
+          index: i,
+          success: true,
+          status: 'ok',
+          id: taskId,
+          name: taskName,
+          verified: check.verified,
+          warning: check.warning,
+          placement: __publicPlacement(check.actual)
+        });
       } catch (e) {
         results.push({
           index: i,
           success: false,
+          status: 'failed',
           id: spec.id,
           name: spec.name,
           error: (e && e.message) ? e.message : 'Unknown error moving task'
@@ -121,7 +176,7 @@ export const BATCH_MOVE_TASKS_SCRIPT = `
       }
     }
 
-    return JSON.stringify({ success: true, results: results });
+    return JSON.stringify({ success: true, dryRun: dryRun, results: results });
 `;
 
 /**
@@ -131,6 +186,10 @@ export const BATCH_MOVE_TASKS_SCRIPT = `
  * is moved inside its own try/catch so one failure never aborts the rest.
  * Cycle prevention (moving a task into itself or a descendant) is preserved
  * from the single-task move path.
+ *
+ * With `dryRun`, the destination and every task are resolved exactly as for a
+ * real move and reported as `wouldMove` (with the current container as `from`)
+ * — nothing is moved.
  */
 export async function batchMoveTasks(params: BatchMoveTasksParams): Promise<BatchMoveResult> {
   const validation = validateBatchMoveParams(params);
@@ -138,14 +197,16 @@ export async function batchMoveTasks(params: BatchMoveTasksParams): Promise<Batc
     return { success: false, results: [], error: validation.error };
   }
 
+  const dryRun = params.dryRun === true;
+
   try {
-    const raw = await runOmniJs(BATCH_MOVE_TASKS_SCRIPT, params);
+    const raw = await runOmniJs(BATCH_MOVE_TASKS_SCRIPT, params, dryRun ? { readOnly: true } : undefined);
 
     // An unresolvable destination aborts before any task is touched: report it
     // as the batch error with no per-item results, so the handler prints it once
     // rather than repeating it per task.
     if (raw && raw.destinationError === true) {
-      return { success: false, results: [], error: raw.error || 'Destination could not be resolved.' };
+      return { success: false, results: [], error: raw.error || 'Destination could not be resolved.', dryRun };
     }
 
     const results = coerceBatchResults(raw, params.tasks.length, 'batch_move_tasks script returned no results');
@@ -153,11 +214,13 @@ export async function batchMoveTasks(params: BatchMoveTasksParams): Promise<Batc
     return {
       success,
       results,
-      error: success ? undefined : summarizeBatchErrors(results, 'moved')
+      error: success ? undefined : summarizeBatchErrors(results, dryRun ? 'planned' : 'moved'),
+      dryRun,
+      verified: dryRun ? undefined : allVerified(results)
     };
   } catch (error: any) {
     const message = error?.message || 'Unknown error in batchMoveTasks';
     const results = coerceBatchResults(null, params.tasks.length, message);
-    return { success: false, results, error: summarizeBatchErrors(results, 'moved') };
+    return { success: false, results, error: summarizeBatchErrors(results, 'moved'), dryRun };
   }
 }

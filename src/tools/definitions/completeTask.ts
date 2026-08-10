@@ -10,9 +10,14 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
   try {
     const result = await completeTask(args.task_id);
     if (result.success) {
-      const text = result.alreadyCompleted
+      let text = result.alreadyCompleted
         ? `Task "${result.name}" was already completed (no change)`
         : `Marked task "${result.name}" as completed`;
+      // A repeating task completes this occurrence and spawns the next one —
+      // surface the new id so the caller does not think nothing happened.
+      if (result.nextOccurrenceId) {
+        text += ` — repeating task: next occurrence created (id ${result.nextOccurrenceId})`;
+      }
       return {
         content: [{ type: "text" as const, text }]
       };

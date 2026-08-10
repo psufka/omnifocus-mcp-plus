@@ -2,6 +2,50 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.5.0] - 2026-08-10
+
+Competitive feature release: a survey of all 47 OmniFocus MCP servers on GitHub identified capabilities others had that this server lacked; 35 approved items were implemented. 50 tools (8 new), plus MCP prompts, resources, tool annotations, and handshake instructions. Every OmniJS API this release depends on was verified against a live OmniFocus 4.8.13 before implementation.
+
+### Added — new tools
+- **`manage_reviews`** — GTD review workflow: `list_due` (projects whose review date has arrived), `mark_reviewed` (single or up to 100 projects; implemented by assigning `lastReviewDate`/`nextReviewDate` with calendar-correct interval math, since no `markReviewed` API exists in OmniJS), `set_schedule` (review interval unit + steps, read-back verified).
+- **`analyze`** — evidence-only analytics, one script pass per call: `health_snapshot` (one-call counts), `velocity` (completed vs created per local day, backlog growth/day, median completion hours with repeating-instance exclusion disclosed), `overdue_clusters` (by project and tag), `stalled_projects` (two independent signals: no available next action, root-task inactivity). No invented scores or "insights" — counts, rates, lists, dates only. Live probing corrected three silent traps: global `flattenedTasks` contains project root tasks (now filtered), `project.nextTask` returns the root task (not null) for finished projects, and repeating-task instances are created at completion time.
+- **`update_perspective_rules`** — writes custom perspective filter rules. Keys validated against a vocabulary extracted from OmniFocus's own framework binary (37 rule keys; `actionHasPlannedDate` is real but undocumented; the documented `changed` field is dead) because OmniFocus silently accepts invalid rules. Snapshot → assign → read-back → restore-on-mismatch, all inside one script evaluation; previous rules always returned for undo.
+- **`manage_attachments`** — list/read/add/remove attachments on tasks and projects. 10MB cap enforced script-side before transfer; payloads ≥256KB require a `savePath` instead of inline base64.
+- **`convert_task_to_project`** — promotes a task (with subtasks, tags, note) to a project, optionally into a folder; read-back verified via the shared-primaryKey root-task identity.
+- **`app_control`** — `sync` (document.sync), `undo`/`redo` (require `confirm: true`; without it they only report canUndo/canRedo — the top of the undo stack is often the user's own edit), `get_focus`/`set_focus`/`clear_focus` (front-window sidebar focus), `reveal`. Windowless OmniFocus guarded with an actionable error.
+- **`find_similar_tasks`** — duplicate detection before create: bigram Dice + token Jaccard + containment scoring in Node (the search string never enters OmniJS), ranked matches with ids. `add_omnifocus_task`/`batch_add_items` descriptions steer models to call it first.
+- **`search_items`** — one case-insensitive search across tasks, projects, folders, and tags (names and optionally notes), grouped results with per-type totals.
+
+### Added — existing tools
+- **`filter_tasks`**: logical `and`/`or`/`not` clauses (flat strict condition objects, evaluated in-script, unsupported keys reject loudly); new filters `addedBefore/After`, `modifiedBefore/After`, `droppedBefore/After`, `isRepeating`, `hasNote`, `estimatedMinutes` operators, `nameContains`, `nameMatches` (regex via `new RegExp`, never interpolated); recursive folder scoping (`folderName`/`folderId`); `fields[]` projection; `countOnly` fast path; `offset` pagination with script-authoritative sort/slice and "showing X–Y of Z" output; `completedYesterday` exposed (was implemented but unreachable). Golden test pins the default output byte-identical to 0.4.0.
+- **`set_task_repetition`**: structured rule building — `frequency`/`interval`/`daysOfWeek` (with ordinal positions, "2nd Tuesday" → `BYDAY=2TU`)/`daysOfMonth`/`count`/`endDate` — composed and validated in TypeScript (`src/utils/rrule.ts`), read-back verified with order-independent RRULE comparison and in-script rollback. `anchor`/`catchUpAutomatically` are deliberately NOT accepted: live probing proved every rule property is read-only and the constructor takes exactly `(ruleString, method)` — schedule type and anchor are derived from the method (`Fixed`→Regularly/DueDate, `DueDate`→FromCompletion/DueDate, `DeferUntilDate`→FromCompletion/DeferDate).
+- **`list_custom_perspectives`**: `includeRules` returns each perspective's `archivedFilterRules` + aggregation.
+- **Batch tools**: `dryRun` on batch_add/remove/move (full resolution, zero writes); `batch_add_items` gains `tempId`/`parentTempId` hierarchy wiring (parent + children in one call, tempId→realId mapping returned), `stopOnError`, and `atomic` (in-script reverse-order rollback of everything created; `atomic` requires stop-on-error).
+- **Write verification**: add (single + batch), edit, complete, remove, and move paths read the object back in the same script and report `verified` — a placement mismatch (the upstream silent-inbox bug class) is now a loud warning naming requested vs actual placement.
+
+### Added — MCP protocol surface
+- **Tool annotations** on all 50 tools (`readOnlyHint`/`destructiveHint`/`idempotentHint` + title), driving central cache invalidation.
+- **4 prompts** (`weekly_review`, `inbox_processing`, `daily_planning`, `task_health_scan`) and **4 resources** (`omnifocus://inbox`, `today`, `flagged`, `stats`).
+- **Handshake instructions** steering clients: prefer filter_tasks/search_items over dump_database, never invent ids, find-similar-before-create, sync once at session end.
+- **Schema-size regression guard**: tools/list payload measured and capped (67.4KB/50 tools ≤ 71KB; per-tool 12KB). filter_tasks trimmed 11.2KB → 8.6KB.
+- **Claude Code skill** at `docs/skills/omnifocus/` (tool-selection map, gotchas, workflows).
+
+### Changed — architecture
+- **Concurrency control**: FIFO semaphore around osascript (default 2 concurrent, `OMNIFOCUS_MCP_MAX_CONCURRENT` 1–8) — OmniFocus serializes Apple Events on one thread, and three MCP clients previously spawned unbounded parallel processes. Read-only scripts retry once on `-1712` Apple Event timeouts; writes never retry.
+- **stdin piping**: scripts reach osascript via stdin — no temp files, no cleanup, nothing user-controlled on disk or a command line.
+- **TTL result cache** (30s; 60s for analyze) on list-shaped read tools, cleared by any non-read-only tool call. Cross-process staleness bounded by TTL only (documented limitation).
+- **`byIdentifier` fast lookups** in the shared resolver and `get_task_by_id` (upstream benchmarked ~10x vs scanning), with collection-membership identity checks preserving exact scan semantics.
+- **Status-aware name resolution**: when a name matches several items, a unique active match wins (a stale dropped copy no longer blocks the live item); ambiguity errors list each candidate's status. Fixed `__statusLabel` checking `taskStatus` before `status` — projects expose both, and the former is the root task's status.
+- **Tolerant input (normalize-then-strict)**: stringified booleans/numbers/JSON arrays from weaker clients are coerced then validated against the same strict schema; garbage still fails with the original error; advertised JSON schema unchanged.
+- **Friendly permission errors**: `-1743` → macOS Automation permission steps; `-600` → "OmniFocus is not running."
+- **Date read-back leaks fixed**: dump_database header now local calendar day; list_projects dates localized. (These were the only two UTC leaks — every other path already re-rendered local.)
+- `server.ts` refactored to exported `buildServer()` (testable tool surface) + main guard.
+
+### Notes
+- Env vars: `OMNIFOCUS_MCP_MAX_CONCURRENT`, `OMNIFOCUS_SCRIPT_TIMEOUT_MS`, `OMNIFOCUS_SCRIPT_MAX_OUTPUT_BYTES`, `OMNIFOCUS_OSASCRIPT_BIN` (test seam).
+- Excluded by design: project templates, meeting-notes capture, HTTP transport (not approved); repetition anchor/catch-up (API read-only).
+- 774 tests (was 266), tsc strict, live smoke-tested (read + mutate) before release.
+
 ## [0.4.0] - 2026-08-09
 
 Full-codebase audit release: three independent reviews (query tools, mutation tools, infrastructure) surfaced 40 issues; all were fixed. 42 tools, no tool names changed.

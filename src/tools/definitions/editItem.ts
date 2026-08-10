@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { editItem, EditItemParams } from '../primitives/editItem.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import { optionalIsoDate } from '../../utils/zodHelpers.js';
+import { formatMismatchLines } from '../../utils/mismatchText.js';
 
 export const schema = z.object({
   id: z.string().optional().describe("The ID of the task or project to edit. An ID that matches nothing is an error — it never falls back to the name."),
@@ -36,7 +37,16 @@ export const schema = z.object({
   newProjectStatus: z.enum(['active', 'completed', 'dropped', 'onHold']).optional().describe("For projects: new status. For tasks use newStatus.")
 }).strict();
 
-export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
+/** Test-only seam: production always uses the real primitive. */
+export interface EditItemDeps {
+  editItem: typeof editItem;
+}
+
+export async function handler(
+  args: z.infer<typeof schema>,
+  extra: RequestHandlerExtra<any, any>,
+  deps: EditItemDeps = { editItem }
+) {
   try {
     // Validate that either id or name is provided
     if (!args.id && !args.name) {
@@ -50,7 +60,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     }
 
     // Call the editItem function
-    const result = await editItem(args as EditItemParams);
+    const result = await deps.editItem(args as EditItemParams);
 
     if (result.success) {
       // Item was edited successfully
@@ -67,6 +77,21 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       const warningText = result.warnings && result.warnings.length > 0
         ? `\n⚠️ ${result.warnings.join('\n⚠️ ')}`
         : '';
+
+      // Post-write read-back: a field that did not land the way it was asked
+      // for is reported as a failure, never as a clean success.
+      if (result.verified === false) {
+        // Dates arrive as epoch ms and are rendered LOCAL here — a raw
+        // toISOString() would put a "…Z" timestamp in front of the caller.
+        const mismatchText = formatMismatchLines(result.mismatches ?? []);
+        return {
+          content: [{
+            type: "text" as const,
+            text: `⚠️ ${itemTypeLabel} "${result.name}" was edited${changedText}, but read-back verification failed:\n${mismatchText}${warningText}`
+          }],
+          isError: true
+        };
+      }
 
       return {
         content: [{

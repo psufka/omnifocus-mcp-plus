@@ -158,7 +158,29 @@ function normalizeDateParams(params: EditItemParams): EditItemParams {
 }
 
 /**
- * Edit a task or project in OmniFocus
+ * One field whose read-back did not match what the caller asked for.
+ *
+ * Date fields carry `kind: 'date'` and epoch milliseconds (or null) in
+ * `expected`/`actual` — never a rendered string. The wire format stays
+ * timezone-free and the definition layer renders it local, so a mismatch report
+ * can never leak a `…Z` timestamp to the caller.
+ */
+export interface EditItemMismatch {
+  field: string;
+  expected: unknown;
+  actual: unknown;
+  kind?: 'date';
+}
+
+/**
+ * Edit a task or project in OmniFocus.
+ *
+ * The result is additive-only on purpose: `success`, `id`, `name`,
+ * `changedProperties` and `warnings` keep their existing meaning (move_task
+ * renders them), and `verified` / `mismatches` are new fields carrying the
+ * post-write read-back. `verified: false` means the edit was applied but at
+ * least one field did not read back as requested — callers should surface that
+ * rather than report a clean success.
  */
 export async function editItem(params: EditItemParams): Promise<{
   success: boolean,
@@ -166,6 +188,8 @@ export async function editItem(params: EditItemParams): Promise<{
   name?: string,
   changedProperties?: string,
   warnings?: string[],
+  verified?: boolean,
+  mismatches?: EditItemMismatch[],
   error?: string
 }> {
   try {
@@ -333,6 +357,7 @@ export async function editItem(params: EditItemParams): Promise<{
         changedProperties.push('defer date');
       }
 
+      let plannedDateApplied = false;
       if (args.newPlannedDate !== undefined) {
         try {
           if (args.newPlannedDate === '') {
@@ -340,6 +365,7 @@ export async function editItem(params: EditItemParams): Promise<{
           } else {
             item.plannedDate = new Date(args.newPlannedDate);
           }
+          plannedDateApplied = true;
           changedProperties.push('planned date');
         } catch(e) {
           warnings.push('plannedDate not supported by this OmniFocus version — skipped');
@@ -441,22 +467,194 @@ export async function editItem(params: EditItemParams): Promise<{
         }
       }
 
+      // =====================================================================
+      // Phase 3 — read-back verification.
+      // Every field the caller asked for is re-read from the database and
+      // compared against the requested value, inside this same script so
+      // background sync cannot intervene. A property that silently refused the
+      // write (unsupported in this OmniFocus build, read-only, coerced) is
+      // reported as a mismatch instead of being announced as a clean edit.
+      // =====================================================================
+      const mismatches = [];
+      const recordMismatch = function (field, expected, actual, kind) {
+        mismatches.push({ field: field, expected: expected, actual: actual, kind: kind });
+      };
+      const dateMs = function (value) {
+        if (value === null || value === undefined) { return null; }
+        try { const ms = value.getTime(); return isNaN(ms) ? null : ms; } catch (e) { return null; }
+      };
+      const requestedMs = function (value) {
+        if (value === '') { return null; }
+        const ms = new Date(value).getTime();
+        return isNaN(ms) ? null : ms;
+      };
+      const verifyDate = function (field, requested, actual) {
+        const want = requestedMs(requested);
+        const got = dateMs(actual);
+        if (want === null && got === null) { return; }
+        // A second of slack: OmniFocus stores some dates truncated to the
+        // minute, which is not a failed write.
+        if (want === null || got === null || Math.abs(want - got) > 1000) {
+          // Epoch milliseconds, NOT an ISO string: toISOString() here would be
+          // rendered verbatim by the definition and leak a UTC "…Z" timestamp.
+          // The 'date' kind tells the renderer to format it in local time.
+          recordMismatch(field, want, got, 'date');
+        }
+      };
+      const sameSet = function (a, b) {
+        if (a.length !== b.length) { return false; }
+        for (let i = 0; i < a.length; i++) { if (b.indexOf(a[i]) === -1) { return false; } }
+        return true;
+      };
+      const currentTags = (function () {
+        try { return item.tags.map(t => t.name); } catch (e) { return []; }
+      })();
+
+      // --- Moves ---
+      if (moveToInbox) {
+        let inInbox = false;
+        try { inInbox = item.inInbox === true || item.containingProject === null; } catch (e) { inInbox = false; }
+        if (!inInbox) {
+          recordMismatch('moveToInbox', 'inbox', item.containingProject ? item.containingProject.name : 'unknown');
+        }
+      } else if (destProject) {
+        const cp = item.containingProject;
+        if (!cp || cp.id.primaryKey !== destProject.id.primaryKey) {
+          recordMismatch('project', destProject.name, cp ? cp.name : null);
+        }
+      } else if (destParent) {
+        const nowParent = item.parent;
+        if (!nowParent || nowParent.id.primaryKey !== destParent.id.primaryKey) {
+          recordMismatch('parentTask', destParent.name, nowParent ? nowParent.name : null);
+        }
+      }
+
+      if (destFolder) {
+        let nowFolder = null;
+        try { nowFolder = item.parentFolder; } catch (e) { nowFolder = null; }
+        if (!nowFolder || nowFolder.id.primaryKey !== destFolder.id.primaryKey) {
+          recordMismatch('folder', destFolder.name, nowFolder ? nowFolder.name : null);
+        }
+      }
+
+      // --- Common properties ---
+      if (args.newName !== undefined && item.name !== args.newName) {
+        recordMismatch('newName', args.newName, item.name);
+      }
+      if (args.newNote !== undefined && item.note !== args.newNote) {
+        recordMismatch('newNote', args.newNote, item.note);
+      }
+      if (args.newDueDate !== undefined) { verifyDate('newDueDate', args.newDueDate, item.dueDate); }
+      if (args.newDeferDate !== undefined) { verifyDate('newDeferDate', args.newDeferDate, item.deferDate); }
+      if (args.newPlannedDate !== undefined && plannedDateApplied) {
+        try {
+          verifyDate('newPlannedDate', args.newPlannedDate, item.plannedDate);
+        } catch (e) {
+          warnings.push('plannedDate was written but could not be read back for verification on this OmniFocus version.');
+        }
+      }
+      if (args.newFlagged !== undefined && item.flagged !== args.newFlagged) {
+        recordMismatch('newFlagged', args.newFlagged, item.flagged);
+      }
+      if (args.newEstimatedMinutes !== undefined && item.estimatedMinutes !== args.newEstimatedMinutes) {
+        recordMismatch('newEstimatedMinutes', args.newEstimatedMinutes, item.estimatedMinutes === undefined ? null : item.estimatedMinutes);
+      }
+
+      // --- Tags (set equality; order is not meaningful) ---
+      if (args.replaceTags !== undefined) {
+        if (!sameSet(args.replaceTags, currentTags)) {
+          recordMismatch('replaceTags', args.replaceTags.join(', '), currentTags.join(', '));
+        }
+      } else {
+        if (args.addTags && args.addTags.length > 0) {
+          const missing = args.addTags.filter(t => currentTags.indexOf(t) === -1);
+          if (missing.length > 0) {
+            recordMismatch('addTags', args.addTags.join(', '), currentTags.join(', '));
+          }
+        }
+        if (args.removeTags && args.removeTags.length > 0) {
+          const lingering = args.removeTags.filter(t => currentTags.indexOf(t) !== -1);
+          if (lingering.length > 0) {
+            recordMismatch('removeTags', 'none of: ' + args.removeTags.join(', '), currentTags.join(', '));
+          }
+        }
+      }
+
+      // --- Task status ---
+      if (args.itemType === 'task' && args.newStatus !== undefined) {
+        const statusName = __statusLabel(item);
+        let repeating = false;
+        try { repeating = item.repetitionRule ? true : false; } catch (e) { repeating = false; }
+
+        if (args.newStatus === 'completed') {
+          if (item.taskStatus !== Task.Status.Completed) {
+            if (repeating) {
+              warnings.push('Repeating task: this occurrence was completed and OmniFocus created the next one, so the task still reads as ' + statusName + '.');
+            } else {
+              recordMismatch('newStatus', 'completed', statusName);
+            }
+          }
+        } else if (args.newStatus === 'dropped') {
+          if (item.taskStatus !== Task.Status.Dropped) {
+            if (repeating && args.dropAllOccurrences !== true) {
+              warnings.push('Repeating task: only this occurrence was dropped, so the task still reads as ' + statusName + '. Pass dropAllOccurrences to drop every future occurrence.');
+            } else {
+              recordMismatch('newStatus', 'dropped', statusName);
+            }
+          }
+        } else if (args.newStatus === 'incomplete') {
+          if (item.taskStatus === Task.Status.Completed || item.taskStatus === Task.Status.Dropped) {
+            recordMismatch('newStatus', 'incomplete', statusName);
+          }
+        }
+      }
+
+      // --- Project properties ---
+      if (args.itemType === 'project') {
+        if (args.newSequential !== undefined && item.sequential !== args.newSequential) {
+          recordMismatch('newSequential', args.newSequential, item.sequential);
+        }
+        if (args.newProjectStatus !== undefined) {
+          // Project.taskStatus exists but reports the ROOT TASK's status
+          // (Blocked/Next), so the project status must come from .status.
+          let projectStatusName = 'unknown';
+          try {
+            const raw = String(item.status);
+            const sep = raw.indexOf(': ');
+            projectStatusName = (sep >= 0 && raw.charAt(raw.length - 1) === ']') ? raw.slice(sep + 2, -1) : raw;
+          } catch (e) { projectStatusName = 'unknown'; }
+
+          const expectedStatusNames = { active: 'Active', completed: 'Done', dropped: 'Dropped', onHold: 'OnHold' };
+          const expectedStatusName = expectedStatusNames[args.newProjectStatus];
+          if (expectedStatusName && projectStatusName !== expectedStatusName) {
+            recordMismatch('newProjectStatus', args.newProjectStatus, projectStatusName);
+          }
+        }
+      }
+
       return JSON.stringify({
         success: true,
         id: itemId,
         name: item.name,
         changedProperties: changedProperties.join(', '),
-        warnings: warnings
+        warnings: warnings,
+        verified: mismatches.length === 0,
+        mismatches: mismatches
       });
     `;
 
     const result = await runOmniJs(script, normalizeDateParams(params));
+    const mismatches: EditItemMismatch[] = Array.isArray(result.mismatches) ? result.mismatches : [];
     return {
       success: result.success,
       id: result.id,
       name: result.name,
       changedProperties: result.changedProperties,
       warnings: result.warnings,
+      // Absent on the error paths (the script returns before verification) —
+      // only claim verification when the script actually reported it.
+      verified: result.success ? result.verified === true : undefined,
+      mismatches: mismatches.length > 0 ? mismatches : undefined,
       error: result.error
     };
   } catch (error: any) {
