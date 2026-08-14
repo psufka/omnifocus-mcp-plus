@@ -54,6 +54,22 @@ async function listRegisteredTools() {
   return tools;
 }
 
+function findArrayValuedItems(value: unknown, path = '$'): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => findArrayValuedItems(entry, `${path}[${index}]`));
+  }
+
+  if (value === null || typeof value !== 'object') return [];
+
+  const matches: string[] = [];
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (key === 'items' && Array.isArray(child)) matches.push(childPath);
+    matches.push(...findArrayValuedItems(child, childPath));
+  }
+  return matches;
+}
+
 test('advertised tool schemas stay within the context budget', async () => {
   const tools = await listRegisteredTools();
   assert.ok(tools.length > 0, 'buildServer registered no tools');
@@ -116,6 +132,19 @@ test('every tool advertises a description and a usable input schema', async () =
       );
     }
   }
+});
+
+test('tool schemas avoid tuple-style array-valued items', async () => {
+  const tools = await listRegisteredTools();
+  const incompatibleSchemas = tools.flatMap((tool) =>
+    findArrayValuedItems(tool.inputSchema).map((path) => `${tool.name}:${path}`)
+  );
+
+  assert.deepEqual(
+    incompatibleSchemas,
+    [],
+    'array-valued JSON Schema items are rejected by clients that require items to be a schema object'
+  );
 });
 
 test('every allowlisted zero-arg tool is actually registered and actually zero-arg', async () => {

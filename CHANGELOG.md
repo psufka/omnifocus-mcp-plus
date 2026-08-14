@@ -2,6 +2,12 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.5.1] - 2026-08-14
+
+### Fixed
+- **Codex compatibility for `filter_tasks`**: `estimatedMinutes.between` now advertises an exactly-two-number array instead of Draft-07 tuple-style `items`. Runtime input remains `[minimum, maximum]`, while clients that require `items` to be a single schema object can now load the tool.
+- **Schema compatibility regression guard**: the registered tool surface now fails tests if any input schema emits array-valued `items`.
+
 ## [0.5.0] - 2026-08-10
 
 Competitive feature release: a survey of all 47 OmniFocus MCP servers on GitHub identified capabilities others had that this server lacked; 35 approved items were implemented. 50 tools (8 new), plus MCP prompts, resources, tool annotations, and handshake instructions. Every OmniJS API this release depends on was verified against a live OmniFocus 4.8.13 before implementation.

@@ -70,7 +70,9 @@ const EstimatedMinutesSchema = z.object({
   lessThan: z.number().optional(),
   greaterThan: z.number().optional(),
   equals: z.number().optional(),
-  between: z.tuple([z.number(), z.number()]).optional()
+  between: z.array(z.number()).length(2)
+    .transform((values): [number, number] => [values[0], values[1]])
+    .optional()
 }).strict();
 
 export const schema = z.object({

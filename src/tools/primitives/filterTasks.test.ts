@@ -442,6 +442,21 @@ test('condition and estimate objects are strict — a typo can never widen the r
   );
 });
 
+test('estimatedMinutes.between requires exactly two numbers', () => {
+  assert.equal(
+    filterTasksSchema.safeParse({ estimatedMinutes: { between: [5, 30] } }).success,
+    true
+  );
+  assert.equal(
+    filterTasksSchema.safeParse({ estimatedMinutes: { between: [5] } }).success,
+    false
+  );
+  assert.equal(
+    filterTasksSchema.safeParse({ estimatedMinutes: { between: [5, 30, 60] } }).success,
+    false
+  );
+});
+
 test('an empty or[] is rejected at the schema level (it would match nothing)', () => {
   assert.equal(filterTasksSchema.safeParse({ or: [] }).success, false);
   assert.equal(filterTasksSchema.safeParse({ and: [] }).success, false);

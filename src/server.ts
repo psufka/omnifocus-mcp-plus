@@ -67,7 +67,7 @@ export function buildServer(): McpServer {
 const server = new McpServer(
   {
     name: "OmniFocus MCP Plus",
-    version: "0.5.0"
+    version: "0.5.1"
   },
   { instructions: SERVER_INSTRUCTIONS }
 );
