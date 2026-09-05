@@ -57,6 +57,27 @@ async function call(name, args) {
   return { isError: res.result.isError === true, text: firstText(res.result), data: res.result.structuredContent?.data, meta: res.result.structuredContent?.meta };
 }
 
+// Match the analytics' inclusive [local midnight, observation time] interval.
+// Date values have millisecond precision; filter After/Before bounds are strict.
+// Clause predicates also reject missing timestamps and retain all task statuses.
+async function countObservedActivity(field, startIso, endIso) {
+  const start = Date.parse(startIso), end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+    return { isError: true, text: 'Invalid analytics window' };
+  }
+  return call('filter_tasks', {
+    countOnly: true,
+    taskStatus: ['Available','Next','Blocked','DueSoon','Overdue','Completed','Dropped'],
+    and: [{ [`${field}After`]: new Date(start - 1).toISOString(), [`${field}Before`]: new Date(end + 1).toISOString() }]
+  });
+}
+
+function recordsInObservedWindow(stamps, startIso, endIso) {
+  const start = Date.parse(startIso), end = Date.parse(endIso);
+  return Array.isArray(stamps) && Number.isFinite(start) && Number.isFinite(end) && start <= end &&
+    stamps.every(stamp => { const time = Date.parse(stamp); return time >= start && time <= end; });
+}
+
 const failures = [];
 function check(label, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}: ${label}${detail ? ' — ' + detail.replace(/\n/g, ' | ').slice(0, 220) : ''}`);
@@ -142,6 +163,28 @@ if (mode === 'read') {
   const incomplete = await call('filter_tasks', { countOnly: true });
   check('health and filter incomplete task counts agree', health.data?.incompleteTotal === incomplete.data?.count, `${health.data?.incompleteTotal} / ${incomplete.data?.count}`);
   check('analyze health_snapshot', !health.isError && !health.protoError, health.text.slice(0, 150));
+
+  const healthWindow = await countObservedActivity('completed', health.data?.completedWindowStartIso, health.data?.generatedIso);
+  check('health completion count agrees with its inclusive observed window',
+    !health.isError && !healthWindow.isError && Number.isInteger(healthWindow.data?.count) &&
+    health.data?.completedWindowEndIso === health.data?.generatedIso &&
+    health.data?.completedLast7Days === healthWindow.data?.count,
+    `${health.data?.completedLast7Days} / ${healthWindow.data?.count}`);
+
+  const velocity = await call('analyze', { analysis: 'velocity', velocity: { days: 7 }, fresh: true });
+  const v = velocity.data;
+  const velocityCompleted = await countObservedActivity('completed', v?.windowStartIso, v?.generatedIso);
+  const velocityCreated = await countObservedActivity('added', v?.windowStartIso, v?.generatedIso);
+  check('velocity activity contains no older or future timestamps',
+    !velocity.isError && v?.windowEndIso === v?.generatedIso &&
+    Array.isArray(v?.completed) && recordsInObservedWindow(v.completed.map(record => record.completedIso), v.windowStartIso, v.generatedIso) &&
+    recordsInObservedWindow(v?.created, v?.windowStartIso, v?.generatedIso));
+  for (const [label, records, expected] of [['completed', v?.completed, velocityCompleted], ['created', v?.created, velocityCreated]]) {
+    check(`velocity ${label} total agrees with bounded filter${v?.truncated ? ' (reported record cap)' : ''}`,
+      !velocity.isError && !expected.isError && Array.isArray(records) && Number.isInteger(expected.data?.count) &&
+      (v?.truncated ? records.length <= expected.data.count : records.length === expected.data.count),
+      `${records?.length} / ${expected.data?.count}`);
+  }
 
   const stalled = await call('analyze', { analysis: 'stalled_projects' });
   check('analyze stalled_projects', !stalled.isError && !stalled.protoError, stalled.text.slice(0, 120));

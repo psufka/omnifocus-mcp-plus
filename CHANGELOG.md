@@ -2,6 +2,17 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.6.1] - 2026-09-05
+
+### Fixed
+- Health completion counts and velocity completion/creation records now stop at the analysis observation time, inclusive. Future-dated records no longer inflate totals, daily averages, backlog growth or completion-time statistics.
+- Every analysis calendar boundary derives from the same observation time, including when evaluation crosses midnight. Windows still use local calendar days across DST, leap days and year boundaries.
+- Health and velocity results disclose their exact window end; readable definitions describe the upper bound.
+
+### Verification
+- Seven new behavioral regressions execute the actual analysis script with fixed clocks and boundary/future records. Each failed before the fix.
+- The read smoke runner now compares health and velocity with explicit, equivalent completion/creation bounds and rejects out-of-window records. This avoids assuming a calendar week equals the trailing seven days.
+
 ## [0.6.0] - 2026-09-05
 
 ### Fixed

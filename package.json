@@ -1,7 +1,7 @@
 {
   "name": "omnifocus-mcp-plus",
   "type": "module",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "MCP server for OmniFocus 4 \u2014 52 tools for tasks, projects, folders, tags, perspectives, and advanced filtering",
   "main": "dist/server.js",
   "files": [

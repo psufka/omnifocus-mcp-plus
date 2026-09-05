@@ -75,7 +75,7 @@ export const ANALYZE_SCRIPT = `
   function __iso(d) { return d ? d.toISOString() : null; }
 
   function __startOfToday() {
-    var d = new Date();
+    var d = new Date(now.getTime());
     d.setHours(0, 0, 0, 0);
     return d;
   }
@@ -86,6 +86,12 @@ export const ANALYZE_SCRIPT = `
     var d = __startOfToday();
     d.setDate(d.getDate() - n);
     return d;
+  }
+
+  // Both endpoints are inclusive. Future-dated imports or edits are not
+  // observed activity, even when their timestamp is later on the same day.
+  function __inObservedWindow(date, start) {
+    return date && date >= start && date <= now;
   }
 
   function __folderPath(project) {
@@ -125,7 +131,7 @@ export const ANALYZE_SCRIPT = `
 
     var completedRecent = 0;
     allTasks.forEach(function (t) {
-      if (t.completionDate && t.completionDate >= completedWindowStart) { completedRecent++; }
+      if (__inObservedWindow(t.completionDate, completedWindowStart)) { completedRecent++; }
     });
 
     var pActive = 0, pOnHold = 0, pDone = 0, pDropped = 0, pNoNext = 0;
@@ -144,6 +150,7 @@ export const ANALYZE_SCRIPT = `
       analysis: 'health_snapshot',
       generatedIso: __iso(now),
       completedWindowStartIso: __iso(completedWindowStart),
+      completedWindowEndIso: __iso(now),
       inboxIncomplete: inboxIncomplete,
       incompleteTotal: incomplete.length,
       overdue: overdue,
@@ -173,7 +180,7 @@ export const ANALYZE_SCRIPT = `
 
     allTasks.forEach(function (t) {
       var c = t.completionDate;
-      if (c && c >= windowStart) {
+      if (__inObservedWindow(c, windowStart)) {
         if (completedRecords.length < RECORD_CAP) {
           // repeating: a repeating task's completed instance is materialized AT
           // completion time (verified live: added lands a few hundred ms AFTER
@@ -188,7 +195,7 @@ export const ANALYZE_SCRIPT = `
         } else { completedTruncated = true; }
       }
       var a = t.added;
-      if (a && a >= windowStart) {
+      if (__inObservedWindow(a, windowStart)) {
         if (createdStamps.length < RECORD_CAP) { createdStamps.push(__iso(a)); }
         else { createdTruncated = true; }
       }
@@ -200,6 +207,7 @@ export const ANALYZE_SCRIPT = `
       analysis: 'velocity',
       days: days,
       windowStartIso: __iso(windowStart),
+      windowEndIso: __iso(now),
       generatedIso: __iso(now),
       completed: completedRecords,
       created: createdStamps,
@@ -425,7 +433,7 @@ export function renderHealthSnapshot(data: any): string {
   lines.push(
     '_Definitions: project roots ' + (data.includeProjectRoots ? 'included' : 'excluded') + '. Dates: ' + (data.dateMode || 'direct') + '. "Overdue" and "Due today" overlap ' +
     'for a task whose due time already passed today. "Completed in last 7 days" counts ' +
-    `completions on or after ${localDate(data.completedWindowStartIso)} (local). ` +
+    `completions from ${localDate(data.completedWindowStartIso)} at local midnight through the observation time above, inclusive. ` +
     '"Active with no next action" is project.nextTask === null — it means the project has remaining ' +
     'tasks but none is currently actionable. A project with no remaining tasks reports its own root ' +
     'task as nextTask, so it is NOT counted here._'
@@ -514,7 +522,7 @@ export function renderVelocity(data: any): string {
   }
   lines.push('');
   lines.push(
-    '_Definitions: days are LOCAL calendar days. "Completed" buckets on completionDate, "Created" on the ' +
+    '_Definitions: days are LOCAL calendar days, ending at the observation time above; future timestamps are excluded. "Completed" buckets on completionDate, "Created" on the ' +
     'task creation date — including instances of repeating tasks, which are created each time the previous ' +
     'instance is completed. Project root tasks are excluded from both._'
   );

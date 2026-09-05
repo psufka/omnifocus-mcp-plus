@@ -36,6 +36,11 @@ included; `fields` selects optional components in both readable and structured o
 Attachment reads saved to disk expose `savedPath`, with no inline base64 payload.
 Machine dates use ISO instants or epoch milliseconds; present them in local time.
 
+Health and velocity activity windows end at `generatedIso` (the observation time).
+Both endpoints are inclusive: health exposes `completedWindowStartIso` and
+`completedWindowEndIso`; velocity exposes `windowStartIso` and `windowEndIso`.
+The start uses local calendar days; future completion/creation timestamps are excluded.
+
 ## Creates and uncertain outcomes
 
 Creation tools accept `idempotencyKey`: add task, add project, batch add, create
