@@ -14,6 +14,8 @@ import {
 // would silently swallow a typo'd key (e.g. "inactivedays") and then quietly
 // use the default.
 export const schema = z.object({
+  includeProjectRoots: z.boolean().optional().describe('Include project root tasks (default false).'),
+  dateMode: z.enum(['direct', 'effective']).optional().describe('Date predicates use dates set directly on tasks, or effective dates inherited from parents/projects. Default: direct.'),
   analysis: z
     .enum(['health_snapshot', 'velocity', 'overdue_clusters', 'stalled_projects'])
     .describe(

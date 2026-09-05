@@ -1,12 +1,13 @@
 import { z } from 'zod';
+import { optionalIsoDate, isoDateDescription } from '../../utils/zodHelpers.js';
 import { listProjects } from '../primitives/listProjects.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 
 export const schema = z.object({
   folder: z.string().optional().describe("Filter to projects within this folder name"),
   status: z.enum(['active', 'on_hold', 'completed', 'dropped']).optional().describe("Filter by project status"),
-  completedBefore: z.string().optional().describe("ISO date - only projects completed before this date"),
-  completedAfter: z.string().optional().describe("ISO date - only projects completed after this date"),
+  completedBefore: optionalIsoDate(isoDateDescription("Only projects completed before this date")),
+  completedAfter: optionalIsoDate(isoDateDescription("Only projects completed after this date")),
   stalledOnly: z.boolean().optional().describe("Only return stalled projects (active with tasks but no next action)"),
   sortBy: z.enum(['name', 'dueDate', 'completionDate', 'remainingTaskCount']).optional().describe("Sort field (default: name)"),
   sortOrder: z.enum(['asc', 'desc']).optional().describe("Sort order (default: asc)"),

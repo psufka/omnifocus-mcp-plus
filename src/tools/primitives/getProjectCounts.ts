@@ -42,5 +42,5 @@ export async function getProjectCounts(params: GetProjectCountsParams = {}): Pro
       stalled: stalled
     });
   `;
-  return await runOmniJs(script, params);
+  return await runOmniJs(script, params, { readOnly: true });
 }

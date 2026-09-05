@@ -2,6 +2,7 @@
 // Based on and improved from user-provided code
 
 (() => {
+  /* @task-query-helpers */
   // Get injected arguments. Read once here so the catch block below does not
   // depend on the injected top-level bindings. Named distinctly so it can never
   // collide with an injected `perspectiveName` declaration in this scope.
@@ -36,7 +37,7 @@
     let taskMap = {};
 
     function collectTasks(node, parentId) {
-      if (node.object && node.object instanceof Task) {
+      if (node.object && node.object instanceof Task && __isRealTask(node.object)) {
         let t = node.object;
         let id = t.id.primaryKey;
 

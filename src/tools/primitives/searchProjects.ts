@@ -31,5 +31,5 @@ export async function searchProjects(params: SearchProjectsParams): Promise<any>
 
     return JSON.stringify({ success: true, projects: result, count: result.length });
   `;
-  return await runOmniJs(script, params);
+  return await runOmniJs(script, params, { readOnly: true });
 }

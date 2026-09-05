@@ -2,6 +2,40 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.6.0] - 2026-09-05
+
+### Fixed
+- Atomic creation rollback verifies absence by ID and distinguishes complete and partial cleanup. Surviving IDs remain available for recovery, including when deletion silently does nothing.
+- Task/project creation and edits resolve the entire tag plan before writes. Duplicate eligible names fail; explicit IDs and unique parent/child paths are supported. Read-back verifies tag identity, including mutually exclusive group effects.
+- JXA wrappers preserve typed Apple Event failures, so pure reads retry once on -1712 and -1743 explains Automation permissions. Writes are never retried. Older pure read primitives now carry the read-only classification.
+- Cache generations prevent reads begun before a mutation from refilling a cleared cache. Writes invalidate both before and after execution.
+- Tag counts and count sorting use the documented `availableTasks.length` collection.
+- Shared task-query helpers exclude project root tasks from filters, counts, search, analytics and perspective readers. Main query tools support explicit inclusion.
+- Strict ISO syntax and calendar validation reject overflow dates, invalid leap days and non-ISO strings. Project completion bounds now normalize bare dates to local midnight. Clear-date empty strings remain limited to edit fields.
+- Updated locked transitive packages to fast-uri 3.1.7 and qs 6.16.0 through Socket Firewall; dependency audit reports zero vulnerabilities.
+- Package metadata supplies the server version and smoke-test expectation. Build metadata records commit, content hash and dirty status. Node 22+ is the documented development/runtime minimum.
+
+### Added
+- Validated JSON CLI (`omnifocus-mcp` / `node dist/cli.js`) with `list`, `call` and `doctor` commands, using the same official MCP dispatcher as client calls.
+- Structured results and output schemas alongside readable text. IDs, verification, per-item failures and pagination are available without parsing Markdown; projections, similarity ranking and attachment save behavior apply to the machine payload too.
+- `batch_edit_items` for up to 100 edits, with preview, per-item results/read-back and optional stop on error. Earlier successful edits remain if a later edit fails.
+- Durable, cross-process `idempotencyKey` handling on creation tools. Identical requests replay; conflicting arguments fail; an interrupted pending attempt is never blindly repeated.
+- Two shared execution slots per macOS user, with dead-owner recovery and bounded queue waits. Live owners are not evicted by age.
+- `fresh` on cacheable reads, visible process-local cache metadata, LRU bounds of 128 entries/8 MB, and short TTLs.
+- `server_info` reports build/executable paths, OmniFocus user/build versions, capabilities and automation connectivity.
+
+### Compatibility
+- Main task queries now exclude project roots by default. Use `includeProjectRoots: true` when roots are intentional.
+- `dateMode` selects direct or effective due/defer/planned dates. Filters, counts and analytics default to direct; forecast defaults to the actual effective property, including parent restrictions when a task also has its own date.
+- All week predicates default to Sunday. Set `weekStartsOn: "monday"` for Monday-based weeks; completion filters used Monday before this release.
+- Ambiguous tag names are errors; use IDs/paths. Replacing tags cannot be combined with add/remove operations.
+- Tool schema budget deliberately increased from 71 KB to 96 KB for 52 tools, output schemas, batch edits, diagnostics and request metadata. The per-tool cap remains 12 KB.
+- Reconnect all clients after installation; an already running old server keeps its old code and does not participate in the new coordinator.
+
+### Verification
+- Regressions exercise real generated wrappers, concurrent cache fills, separate client processes, durable request keys, failed/no-op rollback, duplicate tags, project roots, date inheritance, calendar validity and DST week boundaries.
+- Live smoke checks compare returned counts/fields and use disposable mutations with cleanup in `finally`. They do not use global undo or modify existing perspective rules.
+
 ## [0.5.1] - 2026-08-14
 
 ### Fixed

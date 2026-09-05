@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
@@ -104,7 +105,7 @@ function verificationNote(result: ManageAttachmentsResult): string {
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
-    const result = await manageAttachments(args);
+    const result = recordToolData(await manageAttachments(args));
 
     if (!result.success) {
       const listing = result.attachments && result.attachments.length > 0

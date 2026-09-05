@@ -5,6 +5,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 const ItemTypeEnum = z.enum(["task", "project", "folder", "tag"]);
 
 export const schema = z.object({
+  includeProjectRoots: z.boolean().optional().describe('Include project root tasks (default false).'),
   query: z.string().min(1).describe("Text to look for. Plain case-insensitive SUBSTRING match — not fuzzy, not a regular expression"),
   types: z.array(ItemTypeEnum).optional().describe("Which entity types to search (default: all four — task, project, folder, tag)"),
   searchIn: z.enum(["names", "notes", "both"]).optional().describe("Where to look (default: names). Notes only exist on tasks and projects, so 'notes' returns nothing for folders and tags"),

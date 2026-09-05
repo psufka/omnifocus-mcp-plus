@@ -1,12 +1,12 @@
 # OmniFocus MCP Plus
 
-A comprehensive MCP server for OmniFocus 4 with 50 tools covering task management, project/folder/tag CRUD, GTD review workflow, analytics, custom perspectives (including rule editing), attachments, notifications, and advanced filtering — plus MCP prompts, resources, tool annotations, and a Claude Code skill.
+A comprehensive MCP server for OmniFocus 4 with 52 tools covering task management, project/folder/tag CRUD, GTD review workflow, analytics, custom perspectives (including rule editing), attachments, notifications, and advanced filtering — plus MCP prompts, resources, tool annotations, and a Claude Code skill.
 
 Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
 ## Installation
 
-Requires macOS with OmniFocus 4 and Node.js 18+.
+Requires macOS with OmniFocus 4 and Node.js 22+.
 
 ### From Source
 
@@ -20,7 +20,33 @@ claude mcp add omnifocus -- node "$(pwd)/dist/server.js"
 
 Restart Claude Code to pick up the new server.
 
-## Tools (50)
+## CLI, diagnostics and reliable writes
+
+The CLI uses the same validation, normalization and dispatcher as MCP:
+
+```sh
+node dist/cli.js doctor
+node dist/cli.js list
+node dist/cli.js call filter_tasks '{"countOnly":true,"dateMode":"effective"}'
+node dist/cli.js call batch_edit_items --stdin < edits.json
+```
+
+The installed binary is `omnifocus-mcp`. Tool results include readable text and
+`structuredContent: {success, tool, data, meta?}` with output schemas. Use `server_info`
+to confirm the version, commit/build hash, Node executable, OmniFocus version and
+connectivity. `batch_edit_items` previews or applies up to 100 edits with per-item
+verification. Creates accept `idempotencyKey` to coordinate retries across clients.
+
+**Compatibility changes in 0.6:** task queries exclude project root tasks by default;
+`includeProjectRoots: true` opts in. Filters/counts/analytics default to
+`dateMode: "direct"`, forecast to `"effective"`. Every week filter now starts Sunday
+unless `weekStartsOn: "monday"` is supplied; completion weeks used Monday previously.
+Tag assignments accept IDs or unique paths, and ambiguous names fail before writes.
+
+Read [the operations guide](docs/skills/omnifocus/reliability.md) for result shapes,
+request-key recovery, rollback states, freshness and process coordination.
+
+## Tools (52)
 
 ### Task Management
 | Tool | Description |
@@ -37,6 +63,7 @@ Restart Claude Code to pick up the new server.
 | `set_task_repetition` | Set/clear repeating schedule — structured fields ("2nd Tuesday monthly") or raw iCal RRULE |
 | `append_to_note` | Append text to a task or project note |
 | `batch_add_items` | Add multiple tasks/projects in one call — tempId hierarchy, dryRun, atomic rollback |
+| `batch_edit_items` | Preview or apply up to 100 task/project edits with per-item verification |
 | `batch_remove_items` | Remove multiple items in one call (dryRun supported) |
 | `batch_move_tasks` | Move multiple tasks to a destination in one call (dryRun supported) |
 | `reorder_task` | Reorder task within its container: before/after sibling, or beginning/ending |
@@ -100,11 +127,16 @@ Restart Claude Code to pick up the new server.
 | `update_tag` | Update tag name or status |
 | `delete_tag` | Delete a tag |
 
+### Diagnostics
+| Tool | Description |
+|------|-------------|
+| `server_info` | Report build/executable details and optionally probe OmniFocus connectivity/capabilities |
+
 ## MCP Surface & Environment
 
-Beyond tools, the server exposes **4 prompts** (`weekly_review`, `inbox_processing`, `daily_planning`, `task_health_scan` — surfaced as slash commands in Claude Code), **4 resources** (`omnifocus://inbox`, `today`, `flagged`, `stats`), **tool annotations** (readOnly/destructive/idempotent hints on all 50 tools), and **handshake instructions** that steer clients toward the cheap tools. A Claude Code skill lives at `docs/skills/omnifocus/` (install: `ln -s "$(pwd)/docs/skills/omnifocus" ~/.claude/skills/omnifocus`).
+Beyond tools, the server exposes **4 prompts** (`weekly_review`, `inbox_processing`, `daily_planning`, `task_health_scan` — surfaced as slash commands in Claude Code), **4 resources** (`omnifocus://inbox`, `today`, `flagged`, `stats`), **tool annotations** (readOnly/destructive/idempotent hints on all 52 tools), and **handshake instructions** that steer clients toward the cheap tools. A Claude Code skill lives at `docs/skills/omnifocus/` (install: `ln -s "$(pwd)/docs/skills/omnifocus" ~/.claude/skills/omnifocus`).
 
-Environment variables: `OMNIFOCUS_MCP_MAX_CONCURRENT` (concurrent osascript processes, default 2, range 1–8 — OmniFocus serializes Apple Events on one thread), `OMNIFOCUS_SCRIPT_TIMEOUT_MS` (default 120000), `OMNIFOCUS_SCRIPT_MAX_OUTPUT_BYTES` (default 50MB).
+All MCP/CLI clients share two execution slots for the macOS user. Environment variables: `OMNIFOCUS_MCP_MAX_CONCURRENT` (local limit, default 2, range 1–8; still subject to the two shared slots), `OMNIFOCUS_MCP_STATE_DIR` (shared lock/request directory, default `~/.omnifocus-mcp`), `OMNIFOCUS_SCRIPT_TIMEOUT_MS` (default 120000), `OMNIFOCUS_SCRIPT_MAX_OUTPUT_BYTES` (default 50MB).
 
 ## Usage Examples
 
@@ -203,7 +235,7 @@ All tools are called automatically by Claude via MCP. The examples below show th
 
 ### Date Format
 
-All dates must use full ISO 8601 with timezone offset. Bare dates like `2026-03-15` resolve to UTC midnight and display as the wrong day in local time.
+Use valid ISO calendar dates or timestamps. Bare dates such as `2026-03-15` mean local midnight. Full timestamps with an offset or `Z` pin an instant. Impossible dates such as `2026-02-31` are rejected. Empty strings clear dates only in edit fields. Readable results show local time; structured results may use ISO instants or epoch milliseconds.
 
 ```
 "2026-03-15T17:00:00-05:00"   (CDT)
@@ -229,11 +261,12 @@ All tools use **OmniJS via JXA** — inline JavaScript executed inside OmniFocus
 
 ## Changelog
 
-Current version: 0.5.1. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+Current version: 0.6.0. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Known Limitations
 
-- **Parameter injection in `executeOmniFocusScript` is fragile** — Uses regex replacement for query scripts. CRUD tools use direct JSON injection via `runOmniJs()` instead.
+- **Cache scope** — GUI edits and other processes’ writes become visible on TTL expiry; use `fresh: true` on cacheable reads when current data is required.
+- **Uncertain creates** — Request keys are durable and never expire automatically. A pending record requires inspection rather than an automatic second create.
 - **Notification API** — Relative notification offset retrieval may not work on all OmniFocus versions. Absolute notifications are fully supported.
 
 ## Contributing

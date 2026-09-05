@@ -93,6 +93,7 @@ test('handler returns rendered markdown and passes resolved args to a read-only 
   assert.equal(calls[0].script, ANALYZE_SCRIPT);
   assert.deepEqual(calls[0].options, { readOnly: true });
   assert.deepEqual(calls[0].args, {
+    dateMode: 'direct', includeProjectRoots: false,
     analysis: 'health_snapshot',
     days: 14,
     inactiveDays: 30,
@@ -110,6 +111,7 @@ test('handler forwards caller options into the script args', async () => {
   );
 
   assert.deepEqual(calls[0].args, {
+    dateMode: 'direct', includeProjectRoots: false,
     analysis: 'stalled_projects',
     days: 14,
     inactiveDays: 60,

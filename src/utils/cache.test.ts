@@ -27,3 +27,21 @@ test('cache: set/get round-trip, TTL expiry, clear', async () => {
   assert.equal(cacheGet(key), undefined);
   assert.equal(cacheSize(), 0);
 });
+
+test('cache generation rejects obsolete fills and LRU bounds storage', async () => {
+  const { cacheGeneration, MAX_CACHE_ENTRIES, MAX_CACHE_BYTES } = await import('./cache.js');
+  cacheClear();
+  const oldGeneration = cacheGeneration();
+  cacheClear();
+  cacheSet('stale', 'before', 30_000, oldGeneration);
+  assert.equal(cacheGet('stale'), undefined);
+  for (let i = 0; i < MAX_CACHE_ENTRIES; i++) cacheSet(String(i), i);
+  cacheGet('0');
+  cacheSet('next', 1);
+  assert.equal(cacheSize(), MAX_CACHE_ENTRIES);
+  assert.equal(cacheGet('1'), undefined);
+  assert.equal(cacheGet('0'), 0);
+  cacheSet('too-large', 'x'.repeat(MAX_CACHE_BYTES));
+  assert.equal(cacheGet('too-large'), undefined);
+  cacheClear();
+});

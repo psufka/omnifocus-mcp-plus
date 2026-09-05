@@ -76,6 +76,9 @@ const EstimatedMinutesSchema = z.object({
 }).strict();
 
 export const schema = z.object({
+  includeProjectRoots: z.boolean().optional().describe('Include project root tasks (default false).'),
+  dateMode: z.enum(['direct', 'effective']).optional().describe('Date predicates use dates set directly on tasks, or effective dates inherited from parents/projects. Default: direct.'),
+  weekStartsOn: z.enum(['sunday', 'monday']).optional().describe('Start of every week predicate, including completedThisWeek. Default Sunday (changed from Monday for completions in 0.6).'),
   // Task status filter
   taskStatus: z.array(TaskStatusEnum).optional().describe("Filter by task status. Can specify multiple statuses"),
 
@@ -117,7 +120,7 @@ export const schema = z.object({
   completedAfter: optionalIsoDate("Show tasks completed after this date. Bare YYYY-MM-DD is safe: it means local midnight that day"),
   completedToday: z.boolean().optional().describe("Show tasks completed today (since local midnight)"),
   completedYesterday: z.boolean().optional().describe("Show tasks completed yesterday (local midnight to local midnight)"),
-  completedThisWeek: z.boolean().optional().describe("Show tasks completed since the most recent Monday at local midnight"),
+  completedThisWeek: z.boolean().optional().describe("Show tasks completed since the start of this week at local midnight (default Sunday)"),
   completedThisMonth: z.boolean().optional().describe("Show tasks completed since the 1st of this month at local midnight"),
 
   // Metadata date filters

@@ -1,7 +1,9 @@
+import { collectToolResult } from './toolResult.js';
+import { IDEMPOTENT_CREATE_TOOLS, withIdempotency } from './idempotency.js';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { cacheKey, cacheGet, cacheSet, cacheClear, DEFAULT_CACHE_TTL_MS } from "./cache.js";
+import { cacheKey, cacheGet, cacheSet, cacheClear, cacheGeneration, DEFAULT_CACHE_TTL_MS } from "./cache.js";
 
 type Handler = (args: any, extra: any) => any;
 
@@ -132,7 +134,11 @@ export function registerStrictTool(
   options?: StrictToolOptions
 ): void {
   const objectSchema = unwrapToObject(schema);
-  const strictObject = withCoercion(objectSchema).strict();
+  const supportsKey = IDEMPOTENT_CREATE_TOOLS.has(name);
+  const extras: z.ZodRawShape = {};
+  if (options?.cacheable) extras.fresh = z.boolean().optional().describe('Bypass the process-local cache. Other clients and GUI changes may otherwise remain cached for the advertised TTL.');
+  if (supportsKey) extras.idempotencyKey = z.string().min(1).max(200).optional().describe('Stable request key for this create. Reuse identical arguments to replay its result across clients; an uncertain earlier attempt is never repeated.');
+  const strictObject = withCoercion(objectSchema.extend(extras)).strict();
   const needsFullParse = schema !== objectSchema;
 
   const isReadOnly = options?.annotations?.readOnlyHint === true;
@@ -163,27 +169,33 @@ export function registerStrictTool(
       }
     : handler;
 
-  const callback = async (args: any, extra: any) => {
+  const callback = async (input: any, extra: any) => {
+    const { fresh, idempotencyKey, ...args } = input;
+    const invoke = () => collectToolResult(name, async () => {
+      const result = await validated(args, extra);
+      return result;
+    });
+    const execute = () => idempotencyKey ? withIdempotency(name, idempotencyKey, args, invoke) : invoke();
     if (options?.cacheable) {
       const key = cacheKey(name, args);
-      const hit = cacheGet(key);
-      if (hit !== undefined) return hit;
-      const result = await validated(args, extra);
-      if (!result?.isError) {
-        cacheSet(key, result, options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS);
+      if (!fresh) {
+        const hit: any = cacheGet(key);
+        if (hit !== undefined) return { ...hit, structuredContent: { ...hit.structuredContent, meta: { ...hit.structuredContent.meta, cache: { ...hit.structuredContent.meta?.cache, hit: true } } } };
       }
+      const generation = cacheGeneration();
+      const result = await invoke();
+      result.structuredContent.meta = { ...result.structuredContent.meta, cache: {
+        scope: 'process', hit: false, ttlMs: options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
+        observedAt: new Date().toISOString(), crossProcessInvalidation: false
+      } };
+      if (!result?.isError) cacheSet(key, result, options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS, generation);
       return result;
     }
-    if (isReadOnly) {
-      return validated(args, extra);
-    }
-    // Every non-read-only call invalidates all cached reads, whether it
-    // succeeded or not — a failed mutation may still have partially applied.
-    try {
-      return await validated(args, extra);
-    } finally {
-      cacheClear();
-    }
+    if (isReadOnly) return invoke();
+    cacheClear();
+    try { return await execute(); }
+    catch (error) { return collectToolResult(name, async () => { throw error; }); }
+    finally { cacheClear(); }
   };
 
   server.registerTool(
@@ -191,6 +203,7 @@ export function registerStrictTool(
     {
       description,
       inputSchema: strictObject as any,
+      outputSchema: z.object({ success: z.boolean(), tool: z.string(), data: z.unknown().nullable(), meta: z.record(z.unknown()).optional() }).strict() as any,
       ...(options?.title ? { title: options.title } : {}),
       ...(options?.annotations ? { annotations: options.annotations } : {}),
     },

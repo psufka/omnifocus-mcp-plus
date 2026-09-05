@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { batchAddItems, BatchAddItemsParams } from '../primitives/batchAddItems.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
@@ -21,6 +22,7 @@ export const batchAddItemObjectSchema = z.object({
   flagged: z.boolean().optional().describe("Whether the item is flagged or not"),
   estimatedMinutes: z.number().optional().describe("Estimated time to complete the item, in minutes"),
   tags: z.array(z.string()).optional().describe("Tags to assign to the item"),
+  tagIds: z.array(z.string().min(1)).optional().describe("Exact tag IDs; combine with names/paths in tags. Unknown IDs fail before any write."),
 
   // Task-specific properties
   projectName: z.string().optional().describe("For tasks: The name of the project to add the task to"),
@@ -190,6 +192,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       stopOnError: args.stopOnError,
       atomic: args.atomic
     });
+    recordToolData(result);
 
     // Nothing was attempted (e.g. empty items array) — there is no per-item
     // detail to show, so report the batch-level error on its own.
@@ -214,8 +217,10 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const failureCount = result.results.length - successCount;
 
     let message: string;
-    if (result.rolledBack) {
-      message = `↩️ Rolled back — atomic batch failed, so all ${result.results.length} items were reverted. Nothing remains in OmniFocus from this call.`;
+    if (result.rollbackStatus === 'partial') {
+      message = `⚠️ Atomic batch failed and rollback is INCOMPLETE. ${(result.survivingItems ?? []).length} created objects remain; use the surviving IDs below to recover.`;
+    } else if (result.rolledBack) {
+      message = `↩️ Atomic batch rolled back. Every created object was verified absent; nothing remains from this call.`;
     } else if (successCount > 0) {
       message = `✅ Successfully added ${successCount} items.`;
       if (failureCount > 0) message += ` ⚠️ Failed to add ${failureCount} items.`;
@@ -231,6 +236,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     const details = result.results.map((item, i) => renderItem(item, i, args)).join('\n');
 
     const extras: string[] = [];
+    if (result.survivingItems?.length) extras.push(`**Surviving objects**\n${result.survivingItems.map(item => `- ${item.itemType}: ${item.name} [${item.id ?? 'unknown ID'}]`).join('\n')}`);
     const mappingEntries = Object.entries(result.mapping ?? {});
     if (mappingEntries.length > 0) {
       extras.push(`**tempId → id**\n${mappingEntries.map(([tempId, id]) => `- ${tempId} → ${id}`).join('\n')}`);

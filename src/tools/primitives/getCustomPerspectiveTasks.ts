@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
 import {
   buildPerspectiveTaskTree,
@@ -47,6 +48,7 @@ export async function getCustomPerspectiveTasks(options: GetCustomPerspectiveTas
     const visibleTasks = allTasks.filter((task) => isPerspectiveTaskVisible(task, hideCompleted));
     const matchedCount = visibleTasks.length;
     const limitedTasks = limit > 0 ? visibleTasks.slice(0, limit) : visibleTasks;
+    recordToolData({ success: true, perspectiveName, tasks: limitedTasks, matchedCount, returnedCount: limitedTasks.length, truncated: limitedTasks.length < matchedCount });
     const truncationNote = limitedTasks.length < matchedCount
       ? `(showing ${limitedTasks.length} of ${matchedCount} tasks)`
       : '';

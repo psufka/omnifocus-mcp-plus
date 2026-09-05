@@ -1,3 +1,4 @@
+import { toLocalDateTimeString } from '../../utils/localDate.js';
 import { runOmniJs } from '../../utils/scriptExecution.js';
 
 export interface ListProjectsParams {
@@ -110,5 +111,8 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<any
 
     return JSON.stringify({ success: true, projects: result, count: result.length });
   `;
-  return await runOmniJs(script, params);
+  return await runOmniJs(script, { ...params,
+    ...(params.completedBefore ? { completedBefore: toLocalDateTimeString(params.completedBefore) } : {}),
+    ...(params.completedAfter ? { completedAfter: toLocalDateTimeString(params.completedAfter) } : {})
+  }, { readOnly: true });
 }

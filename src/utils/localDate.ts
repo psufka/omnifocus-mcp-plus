@@ -9,6 +9,8 @@
  * means "that calendar day, local time".
  */
 
+import { isValidIsoDate } from './isoDate.js';
+
 const BARE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -18,6 +20,7 @@ const BARE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  */
 export function toLocalDateTimeString(input: string): string {
   const trimmed = input.trim();
+  if (!isValidIsoDate(trimmed)) throw new Error('Invalid ISO 8601 calendar date: ' + input);
   return BARE_DATE_RE.test(trimmed) ? `${trimmed}T00:00:00` : trimmed;
 }
 
@@ -26,6 +29,7 @@ export function toLocalDateTimeString(input: string): string {
  * Returns null for unparseable input.
  */
 export function parseLocalDate(input: string): Date | null {
+  if (!isValidIsoDate(input)) return null;
   const date = new Date(toLocalDateTimeString(input));
   return isNaN(date.getTime()) ? null : date;
 }

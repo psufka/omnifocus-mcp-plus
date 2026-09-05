@@ -1,22 +1,23 @@
 {
   "name": "omnifocus-mcp-plus",
   "type": "module",
-  "version": "0.5.1",
-  "description": "MCP server for OmniFocus 4 \u2014 50 tools for tasks, projects, folders, tags, perspectives, and advanced filtering",
+  "version": "0.6.0",
+  "description": "MCP server for OmniFocus 4 \u2014 52 tools for tasks, projects, folders, tags, perspectives, and advanced filtering",
   "main": "dist/server.js",
   "files": [
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/skills/omnifocus"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run copy-files && chmod 755 dist/server.js",
+    "build": "tsc -p tsconfig.build.json && npm run copy-files && node scripts/build-info.mjs && chmod 755 dist/server.js dist/cli.js",
     "copy-files": "mkdir -p dist/utils/omnifocusScripts && cp src/utils/omnifocusScripts/*.js dist/utils/omnifocusScripts/",
     "start": "node dist/server.js",
     "dev": "tsc -w",
     "prepublishOnly": "npm run build",
-    "test": "npx tsx --test 'src/**/*.test.ts'"
+    "test": "tsx --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -44,10 +45,13 @@
   ],
   "author": "Paul Sufka <psufka@gmail.com>",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "os": [
     "darwin"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "bin": {
+    "omnifocus-mcp": "dist/cli.js"
+  }
 }

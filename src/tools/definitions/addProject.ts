@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { addProject, AddProjectParams } from '../primitives/addProject.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
@@ -13,6 +14,7 @@ export const schema = z.object({
   flagged: z.boolean().optional().describe("Whether the project is flagged or not"),
   estimatedMinutes: z.number().optional().describe("Estimated time to complete the project, in minutes"),
   tags: z.array(z.string()).optional().describe("Tags to assign to the project"),
+  tagIds: z.array(z.string().min(1)).optional().describe("Exact tag IDs; combine with names/paths in tags. Unknown IDs fail before any write."),
   folderName: z.string().optional().describe("Name or ID of the folder to add the project to (adds at root if omitted). A name matching more than one folder is rejected — pass the folder ID instead."),
   sequential: z.boolean().optional().describe("Whether tasks in the project should be sequential (default: false)")
 }).strict();
@@ -21,6 +23,9 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
   try {
     // Call the addProject function
     const result = await addProject(args as AddProjectParams);
+    recordToolData(result);
+
+    if (result.verified === false) return { content: [{ type: 'text' as const, text: `Project ${result.name} (${result.projectId}) was created, but verification failed: ${result.warning}` }], isError: true };
 
     if (result.success) {
       // Project was added successfully
@@ -53,7 +58,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       return {
         content: [{
           type: "text" as const,
-          text: `✅ Project "${args.name}" created successfully ${locationText}${dueDateText}${plannedDateText}${tagText}${sequentialText}.${warningText}`
+          text: `✅ Project "${args.name}" created successfully [${result.projectId}] ${locationText}${dueDateText}${plannedDateText}${tagText}${sequentialText}.${warningText}`
         }]
       };
     } else {

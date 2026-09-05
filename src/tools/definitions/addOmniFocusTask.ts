@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { addOmniFocusTask, AddOmniFocusTaskParams } from '../primitives/addOmniFocusTask.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
@@ -13,6 +14,7 @@ export const schema = z.object({
   flagged: z.boolean().optional().describe("Whether the task is flagged or not"),
   estimatedMinutes: z.number().optional().describe("Estimated time to complete the task, in minutes"),
   tags: z.array(z.string()).optional().describe("Tags to assign to the task"),
+  tagIds: z.array(z.string().min(1)).optional().describe("Exact tag IDs; combine with names/paths in tags. Unknown IDs fail before any write."),
   projectName: z.string().optional().describe("The name of the project to add the task to (will add to inbox if not specified)"),
   parentTaskId: z.string().optional().describe("The ID of the parent task to create this task as a subtask"),
   parentTaskName: z.string().optional().describe("The name of the parent task to create this task as a subtask (alternative to parentTaskId)")
@@ -31,6 +33,7 @@ export async function handler(
   try {
     // Call the addOmniFocusTask function
     const result = await deps.addOmniFocusTask(args as AddOmniFocusTaskParams);
+    recordToolData(result);
 
     if (result.success) {
       // Task was added successfully

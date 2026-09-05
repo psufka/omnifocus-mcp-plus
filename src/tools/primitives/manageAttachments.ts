@@ -503,6 +503,7 @@ export async function manageAttachments(
     if (typed.dataOmitted) {
       return {
         ...typed,
+        base64: undefined,
         success: false,
         error: `Attachment "${typed.filename}" is ${typed.byteSize} bytes — too large to return inline (limit ${INLINE_BASE64_LIMIT_BYTES} bytes). Call again with an absolute savePath to write it to disk.`
       };

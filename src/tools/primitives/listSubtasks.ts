@@ -84,5 +84,5 @@ export async function listSubtasks(params: ListSubtasksParams): Promise<any> {
     });
   `;
 
-  return await runOmniJs(script, params);
+  return await runOmniJs(script, params, { readOnly: true });
 }

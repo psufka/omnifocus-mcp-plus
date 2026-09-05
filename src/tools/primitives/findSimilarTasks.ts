@@ -1,3 +1,4 @@
+import { OMNIJS_TASK_QUERY_HELPERS } from '../../utils/taskQueryHelpers.js';
 import { runOmniJs } from '../../utils/scriptExecution.js';
 import { rankBySimilarity, type Scored } from '../../utils/similarity.js';
 
@@ -43,6 +44,7 @@ export interface FindSimilarTasksResult {
  * includeCompleted boolean — so there is nothing to interpolate.
  */
 export const FIND_SIMILAR_TASKS_SCRIPT = `
+  ${OMNIJS_TASK_QUERY_HELPERS}
   const includeCompleted = args.includeCompleted === true;
 
   const statusMap = {};
@@ -54,7 +56,7 @@ export const FIND_SIMILAR_TASKS_SCRIPT = `
   statusMap[Task.Status.Next] = 'Next';
   statusMap[Task.Status.Overdue] = 'Overdue';
 
-  const all = flattenedTasks;
+  const all = __queryTasks(false);
   const out = [];
   for (let i = 0; i < all.length; i++) {
     const t = all[i];

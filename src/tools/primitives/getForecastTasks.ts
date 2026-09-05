@@ -1,6 +1,8 @@
 import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
 
 export interface GetForecastTasksOptions {
+  includeProjectRoots?: boolean;
+  dateMode?: 'direct' | 'effective';
   days?: number;
   hideCompleted?: boolean;
   includeDeferredOnly?: boolean;
@@ -12,10 +14,12 @@ export async function getForecastTasks(options: GetForecastTasksOptions = {}): P
   try {
     // Execute the forecast tasks script
     const result = await executeOmniFocusScript('@forecastTasks.js', { 
+      dateMode: options.dateMode || 'effective',
+      includeProjectRoots: options.includeProjectRoots,
       days: days,
       hideCompleted: hideCompleted,
       includeDeferredOnly: includeDeferredOnly
-    });
+    }, { readOnly: true });
     
     
     // If result is an object, format it

@@ -93,5 +93,5 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
     });
   `;
 
-  return await runOmniJs(script, params);
+  return await runOmniJs(script, params, { readOnly: true });
 }

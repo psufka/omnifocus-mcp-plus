@@ -98,7 +98,7 @@ export async function dumpDatabase(options: DumpDatabaseOptions = {}): Promise<O
     const hideCompleted = options.hideCompleted !== false; // Default to true
 
     // Execute the OmniFocus script
-    const data = await executeOmniFocusScript('@omnifocusDump.js', { hideCompleted }) as OmnifocusDumpData;
+    const data = await executeOmniFocusScript('@omnifocusDump.js', { hideCompleted }, { readOnly: true }) as OmnifocusDumpData;
     // wait 1 second
     await new Promise(resolve => setTimeout(resolve, 1000));
 

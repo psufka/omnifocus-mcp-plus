@@ -14,7 +14,7 @@ function readSource(...segments: string[]): string {
 }
 
 function readScript(): string {
-  return readSource('..', '..', 'utils', 'omnifocusScripts', 'filterTasks.js');
+  return injectScriptParameters(readSource('..', '..', 'utils', 'omnifocusScripts', 'filterTasks.js'), {});
 }
 
 function isoWithOffset(daysOffset: number): string {
@@ -149,13 +149,13 @@ test('applyClientSideFilters reads bare dates as local midnight, not UTC midnigh
 // smoke checks rather than executions. End-to-end verification needs a rebuild
 // plus an MCP server restart.
 
-test('filterTasks.js implements a completedThisWeek range (most recent Monday)', () => {
+test('filterTasks.js implements a completedThisWeek range (shared configurable week start)', () => {
   const src = readScript();
   assert.match(src, /completedWeekStart/, 'script missing completedThisWeek boundary');
-  assert.match(src, /\(todayStart\.getDay\(\) \+ 6\) % 7/, 'script not anchoring the completion week to Monday');
+  assert.match(src, /weekStartsOn === 'monday' \? 6 : 0/, 'script missing configurable week start');
   assert.match(
     src,
-    /filters\.completedThisWeek && !\(completionDate && completionDate >= completedWeekStart\)/,
+    /filters\.completedThisWeek && !\(completionDate && completionDate >= completedWeekStart && completionDate < weekEnd\)/,
     'script selects completedThisWeek but never applies the range'
   );
 });
@@ -523,7 +523,7 @@ function fakeTask(name: string, taskStatus: string, extra: Record<string, any> =
   };
 }
 
-function runFilterScript(tasks: any[], args: Record<string, any>): any {
+function runFilterScript(tasks: any[], args: Record<string, any>, now?: Date): any {
   // The file is one IIFE statement; as an expression it must lose its
   // statement-terminating semicolon.
   const scriptExpression = readScript().trim().replace(/;$/, '');
@@ -533,11 +533,13 @@ function runFilterScript(tasks: any[], args: Record<string, any>): any {
     'flattenedFolders',
     'Task',
     'Folder',
+    'Date',
     // Parenthesized: the script file opens with comment lines, and
     // `return` + newline would otherwise be cut short by ASI.
     `return (\n${scriptExpression}\n);`
   );
-  const raw = fn(args, tasks, [], { Status: FAKE_TASK_STATUS }, { byIdentifier: () => null });
+  const Clock = now ? new Function('NativeDate', 'now', 'return class extends NativeDate { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }')(Date, now.getTime()) : Date;
+  const raw = fn(args, tasks, [], { Status: FAKE_TASK_STATUS }, { byIdentifier: () => null }, Clock);
   return JSON.parse(raw);
 }
 
@@ -632,4 +634,61 @@ test('filters.md does not present a top-level-only field as a clause condition',
       `filters.md lists "${key}" as a clause condition, but the strict schema rejects it`
     );
   }
+});
+
+test('filters exclude project roots by default, support explicit inclusion, and select direct/effective dates', () => {
+  const due = new Date(2020, 1, 1);
+  const tasks = [
+    fakeTask('Project root', 'Available', { project: {}, dueDate: due }),
+    fakeTask('Inherited date', 'Available', { project: null, effectiveDueDate: due }),
+    fakeTask('Own date', 'Available', { project: null, dueDate: due })
+  ];
+  assert.equal(runFilterScript(tasks, { countOnly: true }).count, 2);
+  assert.equal(runFilterScript(tasks, { countOnly: true, includeProjectRoots: true }).count, 3);
+  assert.equal(runFilterScript(tasks, { countOnly: true, overdue: true }).count, 1);
+  const effective = runFilterScript(tasks, { countOnly: true, overdue: true, dateMode: 'effective' });
+  assert.equal(effective.count, 2); assert.equal(effective.dateMode, 'effective');
+  const clause = runFilterScript(tasks, { countOnly: true, dateMode: 'effective', and: [{ dueBefore: '2021-01-01T00:00:00' }] });
+  assert.equal(clause.count, 2);
+});
+
+test('counts and filters agree on root exclusion and inherited date selection', async () => {
+  const { GET_TASK_COUNTS_SCRIPT } = await import('./getTaskCounts.js');
+  const due = new Date(2020, 1, 1);
+  const tasks = [
+    fakeTask('Project root', 'Available', { project: {}, dueDate: due }),
+    fakeTask('Inherited date', 'Available', { effectiveDueDate: due }),
+    fakeTask('Own date', 'Available', { dueDate: due })
+  ];
+  const run = (args: any) => JSON.parse(new Function('args','flattenedTasks','Task', GET_TASK_COUNTS_SCRIPT)(args,tasks,{Status:FAKE_TASK_STATUS}));
+  for (const dateMode of ['direct', 'effective']) {
+    const counts = run({ dateMode, dueBefore: '2021-01-01T00:00:00' });
+    const filtered = runFilterScript(tasks, { dateMode, dueBefore: '2021-01-01T00:00:00', countOnly: true });
+    assert.equal(counts.total, filtered.count);
+    assert.equal(counts.overdue, dateMode === 'direct' ? 1 : 2);
+  }
+  assert.equal(run({ includeProjectRoots: true }).total, 3);
+});
+
+test('Sunday and Monday week starts apply equally to completion and due windows, including DST Sunday', () => {
+  const original = process.env.TZ;
+  process.env.TZ = 'America/Chicago';
+  try {
+    for (const now of [new Date(2026, 8, 6, 12), new Date(2026, 2, 8, 12)]) {
+      const sunday = new Date(now); sunday.setHours(0,0,0,0);
+      const monday = new Date(sunday); monday.setDate(monday.getDate()-6);
+      const nextMonday = new Date(sunday); nextMonday.setDate(nextMonday.getDate()+1);
+      const tasks = [sunday,monday,nextMonday].map((date,i) => fakeTask(`day ${i}`, 'Completed', { dueDate: date, completionDate: date }));
+      for (const weekStartsOn of ['sunday', 'monday']) {
+        const common = { weekStartsOn, taskStatus: ['Completed'], countOnly: true };
+        const due = runFilterScript(tasks, { ...common, dueThisWeek: true }, now);
+        const done = runFilterScript(tasks, { ...common, completedThisWeek: true }, now);
+        // Sunday-start includes the coming Monday; Monday-start includes the prior Monday.
+        assert.equal(due.count, 2); assert.equal(done.count, 2);
+        assert.equal(due.weekStartsOn, weekStartsOn); assert.equal(done.weekStartsOn, weekStartsOn);
+        const names = runFilterScript(tasks, { ...common, countOnly: false, dueThisWeek: true }, now).tasks.map((t:any)=>t.name);
+        assert.deepEqual(names, weekStartsOn === 'sunday' ? ['day 0','day 2'] : ['day 0','day 1']);
+      }
+    }
+  } finally { if (original === undefined) delete process.env.TZ; else process.env.TZ = original; }
 });

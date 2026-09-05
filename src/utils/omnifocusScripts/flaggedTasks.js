@@ -1,5 +1,6 @@
 // OmniJS script to get flagged tasks from OmniFocus
 (() => {
+  /* @task-query-helpers */
   try {
     const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
     const hideCompleted = args.hideCompleted !== undefined ? args.hideCompleted : true;
@@ -32,7 +33,7 @@
     };
     
     // Get all flagged tasks using flattenedTasks with flagged filter
-    let flaggedTasks = flattenedTasks.filter(task => task.flagged);
+    let flaggedTasks = __queryTasks(false).filter(task => task.flagged);
     console.log(`Found ${flaggedTasks.length} total flagged tasks`);
     
     // Filter by completion status if needed

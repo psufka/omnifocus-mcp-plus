@@ -105,12 +105,12 @@ for (const name of BATCH_PRIMITIVES) {
 test('batchAddItems rolls back in reverse creation order, inside the same script', () => {
   const src = readPrimitive('batchAddItems.ts');
   assert.match(src, /for \(let r = created\.length - 1; r >= 0; r--\)/, 'rollback must walk the creation ledger backwards');
-  assert.match(src, /deleteObject\(created\[r\]\.obj\)/, 'rollback must use deleteObject');
+  assert.match(src, /deleteObject\(entry\.obj\)/, 'rollback must use deleteObject');
   // A second runOmniJs call would race background sync between the failure and
   // the cleanup, so the rollback has to live in the same script as the writes.
   const scriptStart = src.search(/export const [A-Z_]+_SCRIPT = `/);
   const scriptEnd = src.indexOf('export async function batchAddItems');
-  assert.ok(src.slice(scriptStart, scriptEnd).includes('deleteObject(created[r].obj)'), 'rollback escaped the OmniJS script');
+  assert.ok(src.slice(scriptStart, scriptEnd).includes('deleteObject(entry.obj)'), 'rollback escaped the OmniJS script');
 });
 
 test('every batch script verifies its write by reading the database back', () => {

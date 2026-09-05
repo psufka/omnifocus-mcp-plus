@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import { appControl, type AppControlResult, type FocusSection } from '../primitives/appControl.js';
@@ -139,6 +140,7 @@ function renderSuccess(operation: string, result: AppControlResult): string {
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await appControl(args);
+    recordToolData(result);
 
     if (!result.success) {
       const extraState = (args.operation === 'undo' || args.operation === 'redo') && result.canUndo !== undefined

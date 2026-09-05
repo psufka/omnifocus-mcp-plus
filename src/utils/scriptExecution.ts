@@ -1,3 +1,6 @@
+import { withMacWideSlot, type Lease } from './processLock.js';
+import { recordToolData } from './toolResult.js';
+import { expandScriptHelpers } from './taskQueryHelpers.js';
 import { spawn } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -167,7 +170,7 @@ function makeFailure(message: string, fields: Partial<OsascriptFailure>): Osascr
  * temp file. Nothing user-controlled ever touches the filesystem or a shell
  * command line this way, and there is no temp file to leak on a hard kill.
  */
-function executeOsascript(jxaScript: string): Promise<{ stdout: string; stderr: string }> {
+function executeOsascript(jxaScript: string, lease: Lease): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const timeoutMs = osascriptTimeoutMs();
     const maxOutputBytes = osascriptMaxOutputBytes();
@@ -175,6 +178,8 @@ function executeOsascript(jxaScript: string): Promise<{ stdout: string; stderr: 
     const child = spawn(osascriptBinary(), ['-l', 'JavaScript'], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
+
+    if (child.pid) lease.trackChild(child.pid);
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -338,17 +343,34 @@ function describeExecFailure(error: unknown): Error {
  * for read-only scripts that lost an Apple Event race. A mutating script is
  * NEVER retried — a write that timed out may have partially applied.
  */
+async function executeChecked(jxaScript: string): Promise<{ stdout: string; stderr: string }> {
+  return withScriptSlot(() => withMacWideSlot(async lease => {
+    try {
+      const result = await executeOsascript(jxaScript, lease);
+      const parsed = parseScriptOutput(result.stdout);
+      if (parsed?.__omnifocusTransportError === true) {
+        throw makeFailure(`Apple Event error ${parsed.code ?? 'unknown'}: ${parsed.error}`, {});
+      }
+      return result;
+    } catch (error) {
+      // Retain the shared slot until the forced-kill grace period has elapsed.
+      if ((error as OsascriptFailure)?.timedOut || (error as OsascriptFailure)?.outputLimitExceeded) await delay(KILL_ESCALATION_MS + 100);
+      throw error;
+    }
+  }));
+}
+
 async function runOsascript(
   jxaScript: string,
   options?: ScriptExecutionOptions
 ): Promise<{ stdout: string; stderr: string }> {
   try {
-    return await withScriptSlot(() => executeOsascript(jxaScript));
+    return await executeChecked(jxaScript);
   } catch (error) {
     if (options?.readOnly && isAppleEventTimeout(error)) {
       await delay(READ_ONLY_RETRY_DELAY_MS);
       try {
-        return await withScriptSlot(() => executeOsascript(jxaScript));
+        return await executeChecked(jxaScript);
       } catch (retryError) {
         throw describeExecFailure(retryError);
       }
@@ -363,6 +385,7 @@ async function runOsascript(
  * payload are never treated as substitution patterns.
  */
 export function injectScriptParameters(scriptContent: string, args: any): string {
+  scriptContent = expandScriptHelpers(scriptContent);
   if (!args || Object.keys(args).length === 0) {
     return scriptContent;
   }
@@ -419,7 +442,7 @@ export async function runOmniJs(
     })()\`);
     return result;
   } catch(e) {
-    return JSON.stringify({success:false,error:e.message});
+    return JSON.stringify({__omnifocusTransportError:true,success:false,error:e.message,code:e.errorNumber || e.number || null});
   }
 }`;
 
@@ -427,7 +450,7 @@ export async function runOmniJs(
   if (stderr) {
     console.error("runOmniJs stderr:", stderr);
   }
-  return parseScriptOutput(stdout);
+  return recordToolData(parseScriptOutput(stdout));
 }
 
 // Execute a packaged OmniJS script file (from omnifocusScripts/) in OmniFocus.
@@ -477,7 +500,7 @@ export async function executeOmniFocusScript(
         // Return the result
         return result;
       } catch (e) {
-        return JSON.stringify({ error: e.message });
+        return JSON.stringify({ __omnifocusTransportError: true, success: false, error: e.message, code: e.errorNumber || e.number || null });
       }
     }
     `;
@@ -489,7 +512,7 @@ export async function executeOmniFocusScript(
       console.error("Script stderr output:", stderr);
     }
 
-    return parseScriptOutput(stdout);
+    return recordToolData(parseScriptOutput(stdout));
   } catch (error) {
     console.error("Failed to execute OmniFocus script:", error);
     throw error;

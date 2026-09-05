@@ -5,9 +5,11 @@ description: Use when working with OmniFocus tasks, projects, folders, tags, or 
 
 # OmniFocus
 
-The `omnifocus` MCP server exposes ~50 tools over a live OmniFocus 4 database on
+The `omnifocus` MCP server exposes 52 tools over a live OmniFocus 4 database on
 macOS. Writes take effect immediately; there is no staging area. See
 `filters.md` in this directory for the full `filter_tasks` field reference.
+Read [reliability.md](reliability.md) when using the local CLI, batch edits, request
+keys, fresh reads, or recovering a failed write. `server_info` verifies the loaded release.
 
 ## Pick the right tool
 
@@ -33,6 +35,7 @@ status, stalled; sorts and paginates), `search_projects`, `list_folders`,
 `get_folder`, `list_tags`, `search_tags`, `list_custom_perspectives`.
 
 **Writing:** `add_omnifocus_task`, `add_project`, `batch_add_items`,
+`batch_edit_items` (up to 100 edits with preview),
 `edit_item` (the workhorse: rename, dates, flag, status, tags, move, estimate),
 `complete_task` / `uncomplete_task`, `move_task` / `batch_move_tasks`,
 `duplicate_task`, `convert_task_to_project`, `append_to_note`, `reorder_task`,
@@ -63,20 +66,22 @@ attachments on a task or project, 10MB limit).
 
 ## Gotchas that actually bite
 
-1. **Dates are local, always.** A bare `YYYY-MM-DD` means local midnight that
-   day, in both input and output. Never send a `…Z` string and never convert a
-   returned date to UTC. Full ISO 8601 with an offset
-   (`2026-03-05T09:00:00-06:00`) is also accepted.
+1. **Bare dates mean local midnight.** Valid ISO dates and timestamps with
+   offsets or `Z` are accepted; impossible dates fail. Readable output uses local
+   time, while structured output may carry ISO instants or epoch milliseconds.
+   Present machine dates in the user’s local time.
 2. **Never invent an id.** Ids come from a list/search tool and get passed back
    verbatim. In `edit_item` and `remove_item`, an id that matches nothing is a
    hard error — it does *not* fall back to the name.
 3. **"Ambiguous name" means use the id.** Name lookups error when two items
    share a name rather than guessing. Re-run the lookup, take the id from the
    error, retry. For folders you can also pass a slash path
-   (`Someday/Maybe/Travel`) or `newFolderId`.
+   (`Someday/Maybe/Travel`) or `newFolderId`. Tags accept unique parent/child
+   paths or explicit `tagIds` / `addTagIds` / `removeTagIds` / `replaceTagIds`.
 4. **Check before you create.** Run `find_similar_tasks` first; if a match
    exists, extend it with `append_to_note`/`edit_item` instead of creating a
-   near-duplicate.
+   near-duplicate. Use an `idempotencyKey` for the intended create to coordinate
+   retries across clients; a similarity search alone does not prevent a race.
 5. **`filter_tasks` truncates.** `limit` defaults to 100 and caps at 1000, and
    the output says when results were capped. Use `countOnly` when you only need
    the number, and `offset` to page through a large result set — do not raise
@@ -101,6 +106,15 @@ attachments on a task or project, 10MB limit).
     `moveToInbox` are task-only; `newProjectStatus`, `newSequential`,
     `newFolderName`/`newFolderId` are project-only.
 
+12. **Task queries exclude project roots.** `filter_tasks`, `get_task_counts`,
+    `search_items`, `analyze` and forecast accept `includeProjectRoots: true` when
+    needed. `dateMode` is `direct` by default for filters/counts/analytics and
+    `effective` for forecast. Every week filter now starts Sunday by default;
+    pass `weekStartsOn: "monday"` for a Monday week.
+13. **Check structured results.** Use `structuredContent.data` for IDs, counts,
+    changes and per-item verification. `verified: false` or partial rollback
+    requires inspection of the returned surviving IDs before retrying.
+
 ## Recipes
 
 **Daily plan**
@@ -121,7 +135,7 @@ attachments on a task or project, 10MB limit).
 3. `find_similar_tasks` before creating anything new.
 4. File with one `edit_item` call carrying project, tags, and dates together
    (`{id, itemType: "task", newProjectName, addTags, newDeferDate}`).
-5. `complete_task` for two-minute items, `remove_item` only after confirmation.
+5. `complete_task` for two-minute items, `remove_item` when deletion is authorized.
 6. `app_control` sync, once.
 
 **Weekly review**

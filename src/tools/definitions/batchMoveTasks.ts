@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { batchMoveTasks } from '../primitives/batchMoveTasks.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
@@ -30,6 +31,7 @@ function describePlacement(placement?: BatchPlacement): string {
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await batchMoveTasks(args);
+    recordToolData(result);
 
     // Validation / destination failures abort before any task is attempted, so
     // there is no per-item detail to show. Anything else renders per item, even

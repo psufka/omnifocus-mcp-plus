@@ -13,7 +13,7 @@ export async function listFolders(params: { limit?: number } = {}): Promise<any>
     }));
     return JSON.stringify({ success: true, folders: result, count: result.length });
   `;
-  return await runOmniJs(script, params);
+  return await runOmniJs(script, params, { readOnly: true });
 }
 
 export async function getFolder(params: { name_or_id: string }): Promise<any> {
@@ -48,7 +48,7 @@ export async function getFolder(params: { name_or_id: string }): Promise<any> {
       subfolders: subfolders
     });
   `;
-  return await runOmniJs(script, params);
+  return await runOmniJs(script, params, { readOnly: true });
 }
 
 export async function createFolder(params: { name: string; parent?: string }): Promise<any> {

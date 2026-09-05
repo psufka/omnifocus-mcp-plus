@@ -504,3 +504,40 @@ exit 1
     );
   });
 });
+
+// Execute the generated JXA wrapper itself; a nonzero fake process exit would
+// miss Apple Events caught by that wrapper and returned as JSON on stdout.
+const WRAPPER_FAKE = `#!${process.execPath}
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = process.env.FAKE_COUNT;
+let count = 0;
+try { count = Number(fs.readFileSync(path, 'utf8')); } catch {}
+fs.writeFileSync(path, String(++count));
+const Application = () => ({ evaluateJavascript() {
+  if (count === 1 || process.env.FAKE_ALWAYS) throw Object.assign(new Error('Simulated Apple Event failure'), { errorNumber: Number(process.env.FAKE_CODE) });
+  return JSON.stringify({ success: true, invocation: count });
+} });
+const source = fs.readFileSync(0, 'utf8');
+process.stdout.write(vm.runInNewContext(source + '\\nrun()', { Application }));
+`;
+
+for (const mode of ['inline', 'packaged'] as const) {
+  test(`real ${mode} wrapper retries a read timeout and translates automation denial`, async () => {
+    const dir = makeFakeDir();
+    const bin = writeFakeOsascript(dir, WRAPPER_FAKE);
+    const scriptPath = join(dir, 'read.js');
+    writeFileSync(scriptPath, '(() => JSON.stringify({ success: true }))()');
+    const call = (readOnly: boolean) => mode === 'inline'
+      ? runOmniJs('return JSON.stringify({success:true});', {}, { readOnly })
+      : executeOmniFocusScript(scriptPath, {}, { readOnly });
+    for (const [code, readOnly, expectedCalls] of [[-1712, true, 2], [-1712, false, 1], [-1743, true, 1]] as const) {
+      const count = join(dir, `count-${code}-${readOnly}`);
+      await withEnv({ OMNIFOCUS_OSASCRIPT_BIN: bin, FAKE_COUNT: count, FAKE_CODE: String(code) }, async () => {
+        if (expectedCalls === 2) assert.equal((await call(readOnly)).invocation, 2);
+        else await assert.rejects(call(readOnly), code === -1743 ? /System Settings.*Automation/ : /-1712/);
+        assert.equal(Number(readFileSync(count, 'utf8')), expectedCalls);
+      });
+    }
+  });
+}

@@ -1,3 +1,6 @@
+import { EDIT_ITEM_SCRIPT } from './editItem.js';
+import { BATCH_EDIT_ITEMS_SCRIPT } from './batchEditItems.js';
+import { ADD_PROJECT_SCRIPT } from './addProject.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -18,7 +21,7 @@ import { BATCH_MOVE_TASKS_SCRIPT } from './batchMoveTasks.js';
 //   - Task/Project.byIdentifier returns the object or null (never throws)
 //   - a project's root task shares the project's primaryKey
 //   - inInbox is true only for a DIRECT child of the inbox
-//   - flattenedX excludes project root tasks
+//   - flattenedTasks includes project root tasks
 // ---------------------------------------------------------------------------
 
 type Loc =
@@ -41,6 +44,7 @@ function makeWorld() {
     name: string;
     parent: any = null;
     containingProject: any = null;
+    project: any = null;
     inInbox = false;
     tags: any[] = [];
 
@@ -55,8 +59,11 @@ function makeWorld() {
       return { kind: 'task', obj: this };
     }
 
+    clearTags() { this.tags = []; }
+    removeTag(tag: any) { this.tags = this.tags.filter(t => t !== tag); }
+
     addTag(tag: any) {
-      this.tags.push(tag);
+      if (!this.tags.includes(tag)) this.tags.push(tag);
     }
   }
 
@@ -75,6 +82,10 @@ function makeWorld() {
       this.task = Object.create(Task.prototype);
       this.task.id = this.id;
       this.task.name = name;
+      this.task.project = this;
+      this.task.tags = this.tags;
+      this.task.containingProject = this;
+      this.task.parent = null;
       projects.push(this);
     }
 
@@ -82,8 +93,11 @@ function makeWorld() {
       return { kind: 'project', obj: this };
     }
 
+    clearTags() { this.tags = []; }
+    removeTag(tag: any) { this.tags = this.tags.filter(t => t !== tag); }
+
     addTag(tag: any) {
-      this.tags.push(tag);
+      if (!this.tags.includes(tag)) this.tags.push(tag);
     }
   }
 
@@ -153,7 +167,11 @@ function makeWorld() {
   }
 
   const globals = {
-    flattenedTasks: tasks,
+    flattenedTasks: new Proxy([], { get(_target, key) {
+      const all = tasks.concat(projects.map(p => p.task));
+      const value = (all as any)[key];
+      return typeof value === 'function' ? value.bind(all) : value;
+    } }),
     flattenedProjects: projects,
     flattenedTags: tags,
     flattenedFolders: folders,
@@ -218,6 +236,40 @@ function runRemove(world: ReturnType<typeof makeWorld>, items: any[], options: a
 function runMove(world: ReturnType<typeof makeWorld>, params: any) {
   return runScript(BATCH_MOVE_TASKS_SCRIPT, world, params);
 }
+
+for (const behavior of ['throws', 'silently does nothing']) {
+  test('atomic rollback reports surviving objects when deletion ' + behavior, () => {
+    const world = makeWorld();
+    world.globals.deleteObject = () => { if (behavior === 'throws') throw new Error('Deletion failed'); };
+    const result = runAdd(world, [
+      { itemType: 'task', name: 'Survivor', tempId: 'keep' },
+      { itemType: 'task', name: 'Bad', projectName: 'Missing' }
+    ], { atomic: true });
+    assert.equal(result.rolledBack, false);
+    assert.equal(result.rollbackStatus, 'partial');
+    assert.equal(world.tasks.length, 1);
+    assert.equal(result.survivingItems[0].id, world.tasks[0].id.primaryKey);
+    assert.equal(result.mapping.keep, world.tasks[0].id.primaryKey);
+    assert.equal(result.results[0].status, 'rollbackFailed');
+    assert.equal(result.results[0].success, false);
+    assert.equal(result.rollbackErrors.length, 1);
+  });
+}
+
+test('ambiguous tags fail before creation, including dry runs; IDs disambiguate', () => {
+  const world = makeWorld();
+  world.addTag('Same');
+  const wanted = world.addTag('Same');
+  for (const dryRun of [false, true]) {
+    const result = runAdd(world, [{itemType:'task',name:'Test',tags:['Same']}], {dryRun});
+    assert.equal(result.results[0].success, false);
+    assert.match(result.results[0].error, /Ambiguous Tag/);
+    assert.equal(world.tasks.length, 0);
+  }
+  const result = runAdd(world, [{itemType:'task',name:'Test',tagIds:[wanted.id.primaryKey]}]);
+  assert.equal(result.results[0].verified, true);
+  assert.deepEqual(world.tasks[0].tags, [wanted]);
+});
 
 // --- batch_add_items: dryRun ------------------------------------------------
 
@@ -591,4 +643,54 @@ test('batch_move to the inbox verifies as inbox', () => {
 
   assert.equal(out.results[0].verified, true);
   assert.equal(task.inInbox, true);
+});
+
+test('edit resolves all tags before rename or clear, and verifies exact identities', () => {
+  const world = makeWorld();
+  const first = world.addTag('duplicate'), second = world.addTag('duplicate');
+  const original = world.addTag('original');
+  const task = world.addTask('before'); task.addTag(original);
+  const rejected = runScript(EDIT_ITEM_SCRIPT, world, { id: task.id.primaryKey, itemType: 'task', newName: 'after', replaceTags: ['duplicate'] });
+  assert.equal(rejected.success, false); assert.match(rejected.error, /Ambiguous/);
+  assert.equal(task.name, 'before'); assert.deepEqual(task.tags, [original]);
+  const missing = runScript(EDIT_ITEM_SCRIPT, world, { id: task.id.primaryKey, itemType: 'task', newName: 'after', replaceTagIds: ['missing'] });
+  assert.equal(missing.success, false); assert.equal(task.name, 'before'); assert.deepEqual(task.tags, [original]);
+  const edited = runScript(EDIT_ITEM_SCRIPT, world, { id: task.id.primaryKey, itemType: 'task', replaceTagIds: [second.id.primaryKey] });
+  assert.equal(edited.verified, true); assert.deepEqual(task.tags, [second]);
+  task.addTag = () => {}; // A silent setter refusal must fail verification.
+  const refused = runScript(EDIT_ITEM_SCRIPT, world, { id: task.id.primaryKey, itemType: 'task', addTagIds: [first.id.primaryKey] });
+  assert.equal(refused.verified, false);
+  assert.ok(refused.mismatches.some((m: any) => m.field === 'addTags'));
+});
+
+test('tag paths disambiguate duplicate leaf names; single project creation verifies tags and placement', () => {
+  const world = makeWorld();
+  const parent = world.addTag('Parent');
+  const other = world.addTag('Child');
+  const child: any = world.addTag('Child'); child.parent = parent;
+  const task = world.addTask('tag path');
+  const edited = runScript(EDIT_ITEM_SCRIPT, world, { id: task.id.primaryKey, itemType: 'task', addTags: ['Parent/Child'] });
+  assert.equal(edited.verified, true); assert.deepEqual(task.tags, [child]);
+  const invalid = runScript(ADD_PROJECT_SCRIPT, world, { name: 'reject', tags: ['Child'] });
+  assert.equal(invalid.success, false); assert.equal(world.projects.length, 0);
+  const project = runScript(ADD_PROJECT_SCRIPT, world, { name: 'created', tagIds: [other.id.primaryKey] });
+  assert.equal(project.success, true); assert.equal(project.verified, true);
+  assert.deepEqual(project.tagIds, [other.id.primaryKey]);
+});
+
+test('batch edit previews without changes, reports per-item failures and stops on request', () => {
+  const world = makeWorld();
+  const one = world.addTask('one'), two = world.addTask('two');
+  const items = [
+    { id: one.id.primaryKey, itemType: 'task', newName: 'renamed', addTags: ['new-tag'] },
+    { id: 'missing', itemType: 'task', newFlagged: true },
+    { id: two.id.primaryKey, itemType: 'task', newName: 'two-renamed' }
+  ];
+  const preview = runScript(BATCH_EDIT_ITEMS_SCRIPT, world, { items: items.map(i => ({ ...i, dryRun: true })), dryRun: true });
+  assert.equal(preview.success, false); assert.equal(preview.results[0].status, 'wouldEdit');
+  assert.equal(one.name, 'one'); assert.equal(two.name, 'two'); assert.equal(world.tags.length, 0);
+  const edited = runScript(BATCH_EDIT_ITEMS_SCRIPT, world, { items, stopOnError: true });
+  assert.deepEqual(edited.results.map((r: any) => r.status), ['edited', 'failed', 'skipped']);
+  assert.equal(edited.results[0].verified, true); assert.equal(edited.results[0].id, one.id.primaryKey);
+  assert.equal(one.name, 'renamed'); assert.equal(two.name, 'two'); assert.equal(world.tags.length, 1);
 });

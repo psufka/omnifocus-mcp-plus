@@ -1,7 +1,10 @@
+import { OMNIJS_TASK_QUERY_HELPERS } from '../../utils/taskQueryHelpers.js';
 import { runOmniJs } from '../../utils/scriptExecution.js';
 import { toLocalDateTimeString } from '../../utils/localDate.js';
 
 export interface GetTaskCountsParams {
+  includeProjectRoots?: boolean;
+  dateMode?: 'direct' | 'effective';
   project?: string;
   tag?: string;
   flagged?: boolean;
@@ -16,9 +19,10 @@ export interface GetTaskCountsParams {
  * Overdue), and `dueSoon` comes from Task.Status.DueSoon so it follows the
  * user's own OmniFocus "due soon" setting instead of a hardcoded window.
  */
-export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<any> {
-  const script = `
-    let tasks = flattenedTasks.filter(() => true);
+export const GET_TASK_COUNTS_SCRIPT = `
+    ${OMNIJS_TASK_QUERY_HELPERS}
+    const dateMode = args.dateMode || 'direct';
+    let tasks = __queryTasks(args.includeProjectRoots);
 
     // Filter by project
     if (args.project) {
@@ -46,11 +50,11 @@ export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<a
     // "YYYY-MM-DDTHH:mm:ss", so a bare date means local midnight, not UTC.
     if (args.dueBefore) {
       const before = new Date(args.dueBefore);
-      tasks = tasks.filter(t => t.dueDate && t.dueDate < before);
+      tasks = tasks.filter(t => __queryDate(t, 'dueDate', dateMode) && __queryDate(t, 'dueDate', dateMode) < before);
     }
     if (args.dueAfter) {
       const after = new Date(args.dueAfter);
-      tasks = tasks.filter(t => t.dueDate && t.dueDate > after);
+      tasks = tasks.filter(t => __queryDate(t, 'dueDate', dateMode) && __queryDate(t, 'dueDate', dateMode) > after);
     }
 
     const now = new Date();
@@ -75,13 +79,15 @@ export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<a
       // Task.Status.DueSoon honours the user's own "due soon" preference in
       // OmniFocus rather than a hardcoded window.
       if (t.taskStatus === Task.Status.DueSoon) dueSoon++;
-      if (t.deferDate && new Date(t.deferDate) > now) deferred++;
+      if (__queryDate(t, 'deferDate', dateMode) && new Date(__queryDate(t, 'deferDate', dateMode)) > now) deferred++;
       if (t.flagged) flagged++;
-      if (t.dueDate && t.dueDate < now && t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped) overdue++;
+      if (__queryDate(t, 'dueDate', dateMode) && __queryDate(t, 'dueDate', dateMode) < now && t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped) overdue++;
     });
 
     return JSON.stringify({
       success: true,
+      dateMode: dateMode,
+      includeProjectRoots: args.includeProjectRoots === true,
       total: total,
       available: available,
       completed: completed,
@@ -92,6 +98,9 @@ export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<a
     });
   `;
 
+export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<any> {
+
+
   const normalized: GetTaskCountsParams = { ...params };
   if (typeof normalized.dueBefore === 'string' && normalized.dueBefore.trim() !== '') {
     normalized.dueBefore = toLocalDateTimeString(normalized.dueBefore);
@@ -100,5 +109,5 @@ export async function getTaskCounts(params: GetTaskCountsParams = {}): Promise<a
     normalized.dueAfter = toLocalDateTimeString(normalized.dueAfter);
   }
 
-  return await runOmniJs(script, normalized);
+  return await runOmniJs(GET_TASK_COUNTS_SCRIPT, normalized, { readOnly: true });
 }

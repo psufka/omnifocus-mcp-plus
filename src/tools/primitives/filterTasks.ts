@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
 import { parseLocalDate, toLocalDateTimeString } from '../../utils/localDate.js';
 
@@ -41,6 +42,9 @@ export interface EstimatedMinutesFilter {
 export type FilterTaskField = 'dates' | 'status' | 'estimate' | 'note' | 'tags' | 'project';
 
 export interface FilterTasksOptions {
+  includeProjectRoots?: boolean;
+  dateMode?: 'direct' | 'effective';
+  weekStartsOn?: 'sunday' | 'monday';
   // Task status filter
   taskStatus?: string[];
 
@@ -303,9 +307,9 @@ function isDateInTodayRange(date: Date): boolean {
   return date >= todayStart && date < tomorrowStart;
 }
 
-function isDateInCurrentWeek(date: Date): boolean {
+function isDateInCurrentWeek(date: Date, weekStartsOn: 'sunday' | 'monday' = 'sunday'): boolean {
   const today = new Date();
-  const currentDay = today.getDay(); // Sunday = 0
+  const currentDay = (today.getDay() + (weekStartsOn === 'monday' ? 6 : 0)) % 7;
   const weekStart = startOfDay(today);
   weekStart.setDate(today.getDate() - currentDay); // Sunday start
 
@@ -434,7 +438,7 @@ export function applyClientSideFilters(tasks: any[], options: FilterTasksOptions
   if (options.dueThisWeek) {
     filteredTasks = filteredTasks.filter(task => {
       const dueDate = parseDate(task?.dueDate);
-      return dueDate ? isDateInCurrentWeek(dueDate) : false;
+      return dueDate ? isDateInCurrentWeek(dueDate, options.weekStartsOn) : false;
     });
   }
 
@@ -498,7 +502,7 @@ export function applyClientSideFilters(tasks: any[], options: FilterTasksOptions
   if (options.deferThisWeek) {
     filteredTasks = filteredTasks.filter(task => {
       const deferDate = parseDate(task?.deferDate);
-      return deferDate ? isDateInCurrentWeek(deferDate) : false;
+      return deferDate ? isDateInCurrentWeek(deferDate, options.weekStartsOn) : false;
     });
   }
 
@@ -540,7 +544,7 @@ export function applyClientSideFilters(tasks: any[], options: FilterTasksOptions
   if (options.plannedThisWeek) {
     filteredTasks = filteredTasks.filter(task => {
       const plannedDate = parseDate(task?.plannedDate);
-      return plannedDate ? isDateInCurrentWeek(plannedDate) : false;
+      return plannedDate ? isDateInCurrentWeek(plannedDate, options.weekStartsOn) : false;
     });
   }
 
@@ -726,6 +730,16 @@ export async function filterTasks(options: FilterTasksOptions = {}): Promise<str
 
     // If result is an object, format it
     if (result && typeof result === 'object') {
+      const projected = { ...result, tasks: result.tasks?.map((task: any) => {
+        const copy = { ...task };
+        const groups: Record<string, string[]> = { dates: ['dueDate','deferDate','plannedDate','completedDate','effectiveDueDate','effectiveDeferDate'],
+          status: ['taskStatus','flagged'], estimate: ['estimatedMinutes'], note: ['note'], tags: ['tags'], project: ['projectId','projectName','inInbox'] };
+        if (options.fields?.length) for (const [group, keys] of Object.entries(groups)) {
+          if (!options.fields.includes(group as FilterTaskField)) for (const key of keys) delete copy[key];
+        }
+        return copy;
+      }) };
+      recordToolData(projected);
       return renderFilterTasksResult(result, options);
     }
 

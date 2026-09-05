@@ -1,5 +1,6 @@
 // OmniJS script to get inbox tasks from OmniFocus
 (() => {
+  /* @task-query-helpers */
   try {
     const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
     const hideCompleted = args.hideCompleted !== undefined ? args.hideCompleted : true;
@@ -31,7 +32,7 @@
     };
     
     // Get all tasks and filter for inbox tasks
-    const allTasks = flattenedTasks;
+    const allTasks = __queryTasks(args.includeProjectRoots);
     console.log(`Found ${allTasks.length} total tasks`);
     
     // Filter for inbox tasks (tasks that are in inbox)

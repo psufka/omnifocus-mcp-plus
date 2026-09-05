@@ -1,5 +1,6 @@
 // Simplified script to retrieve tasks completed today
 (() => {
+  /* @task-query-helpers */
   try {
     // Get arguments if available
     const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
@@ -8,7 +9,7 @@
     console.log("=== Today's completed tasks query starting ===");
 
     // Get all tasks
-    const allTasks = flattenedTasks;
+    const allTasks = __queryTasks(args.includeProjectRoots);
     console.log(`Total task count: ${allTasks.length}`);
 
     // Filter completed tasks

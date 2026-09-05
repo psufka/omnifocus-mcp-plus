@@ -13,7 +13,7 @@ export async function getFlaggedTasks(options: GetFlaggedTasksOptions = {}): Pro
     const result = await executeOmniFocusScript('@flaggedTasks.js', { 
       hideCompleted: hideCompleted,
       projectFilter: projectFilter
-    });
+    }, { readOnly: true });
     
     
     // If result is an object, format it

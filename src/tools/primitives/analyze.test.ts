@@ -77,7 +77,7 @@ test('analyze script buckets and thresholds on local calendar fields, not UTC sl
 
 test('analyze script filters out project root tasks before counting', () => {
   assert.match(ANALYZE_SCRIPT, /function __isRealTask/);
-  assert.match(ANALYZE_SCRIPT, /flattenedTasks\.filter\(__isRealTask\)/);
+  assert.match(ANALYZE_SCRIPT, /__queryTasks\(args\.includeProjectRoots\)/);
 });
 
 test('every task walk in the analyze script filters out project root tasks', () => {
@@ -118,6 +118,7 @@ test('analyze makes exactly one read-only script call', async () => {
 
 test('analyze injects resolved defaults as args rather than interpolating them', () => {
   assert.deepEqual(buildScriptArgs({ analysis: 'velocity' }), {
+    dateMode: 'direct', includeProjectRoots: false,
     analysis: 'velocity',
     days: DEFAULT_VELOCITY_DAYS,
     inactiveDays: DEFAULT_INACTIVE_DAYS,
@@ -130,7 +131,7 @@ test('analyze injects resolved defaults as args rather than interpolating them',
       velocity: { days: 3 },
       stalledProjects: { inactiveDays: 90, includeOnHold: true }
     }),
-    { analysis: 'stalled_projects', days: 3, inactiveDays: 90, includeOnHold: true }
+    { analysis: 'stalled_projects', days: 3, inactiveDays: 90, includeOnHold: true, dateMode: 'direct', includeProjectRoots: false }
   );
 });
 
@@ -249,13 +250,11 @@ test('renderHealthSnapshot renders dates locally and offers no verdict', () => {
   assert.doesNotMatch(md, /score|healthy|unhealthy|recommend|you should/i);
 });
 
-test('renderHealthSnapshot discloses that inherited due dates are not counted', () => {
-  // analyze counts each task's own dueDate. A task with no due date of its own
-  // that inherits an overdue one from its project is NOT in these numbers, and
-  // silently differing from the forecast views is worse than saying so.
-  const md = renderHealthSnapshot(HEALTH_FIXTURE);
-  assert.match(md, /OWN due date/);
-  assert.match(md, /effective due date\) is not counted/);
+test('renderHealthSnapshot discloses the selected date and root semantics', () => {
+  assert.match(renderHealthSnapshot(HEALTH_FIXTURE), /Dates: direct/);
+  const effective = renderHealthSnapshot({ ...HEALTH_FIXTURE, dateMode: 'effective', includeProjectRoots: true });
+  assert.match(effective, /Dates: effective/);
+  assert.match(effective, /project roots included/);
 });
 
 test('renderHealthSnapshot renders an empty database as zeros, not blanks', () => {

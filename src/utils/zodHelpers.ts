@@ -1,17 +1,13 @@
 import { z } from "zod";
+import { isValidIsoDate } from './isoDate.js';
 
-// Optional ISO 8601 date string. Accepts:
-//   - undefined / missing
-//   - empty string '' (used by edit_item to mean "clear this date")
-//   - any string parseable by Date.parse (recommended: full ISO 8601 with timezone,
-//     e.g. '2026-03-05T09:00:00-06:00')
-// Rejects unparseable inputs like 'tomorrow' or '2026-13-50' so they surface as
-// validation errors instead of silently producing an Invalid Date inside OmniJS.
-export function optionalIsoDate(description: string) {
+// Strict ISO calendar dates, optional when omitted. Empty strings are accepted
+// only by edit fields that explicitly opt into the clear-date sentinel.
+export function optionalIsoDate(description: string, options: { allowEmpty?: boolean } = {}) {
   return z
     .string()
-    .refine(v => v === "" || !Number.isNaN(Date.parse(v)), {
-      message: "must be a valid ISO 8601 date string (e.g. '2026-03-05T09:00:00-06:00') or empty string",
+    .refine(v => (options.allowEmpty === true && v === "") || isValidIsoDate(v), {
+      message: "must be a valid ISO 8601 calendar date (e.g. '2026-03-05T09:00:00-06:00')" + (options.allowEmpty ? " or empty string to clear" : ""),
     })
     .optional()
     .describe(description);
@@ -26,7 +22,7 @@ export function optionalIsoDate(description: string) {
 export function requiredIsoDate(description: string) {
   return z
     .string()
-    .refine(v => !Number.isNaN(Date.parse(v)), {
+    .refine(isValidIsoDate, {
       message: "must be a valid ISO 8601 date string (e.g. '2026-03-05T09:00:00-06:00')",
     })
     .describe(description);

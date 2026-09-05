@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { VERSION } from './utils/buildInfo.js';
+import * as serverInfoTool from './tools/definitions/serverInfo.js';
+import * as batchEditItemsTool from './tools/definitions/batchEditItems.js';
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -67,10 +70,14 @@ export function buildServer(): McpServer {
 const server = new McpServer(
   {
     name: "OmniFocus MCP Plus",
-    version: "0.5.1"
+    version: VERSION
   },
   { instructions: SERVER_INSTRUCTIONS }
 );
+
+registerStrictTool(server, 'batch_edit_items', 'Edit up to 100 tasks/projects in one call with preview and per-item read-back verification. Earlier edits remain if a later item fails.', batchEditItemsTool.schema, batchEditItemsTool.handler, { annotations: MUTATING_TOOL, title: 'Batch edit items' });
+
+registerStrictTool(server, 'server_info', 'Report server build, executable, OmniFocus version/capabilities and automation connectivity.', serverInfoTool.schema, serverInfoTool.handler, { annotations: READ_ONLY_TOOL, title: 'Server diagnostics' });
 
 // Register tools
 registerStrictTool(server,

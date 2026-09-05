@@ -11,7 +11,7 @@ export async function getInboxTasks(options: GetInboxTasksOptions = {}): Promise
     // Execute the inbox script
     const result = await executeOmniFocusScript('@inboxTasks.js', {
       hideCompleted: hideCompleted
-    });
+    }, { readOnly: true });
 
     // If result is an object, format it
     if (result && typeof result === 'object') {

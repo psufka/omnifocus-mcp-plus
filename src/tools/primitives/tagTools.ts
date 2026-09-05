@@ -1,8 +1,7 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
 import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 
-export async function listTags(params: { status?: string; sortBy?: string; limit?: number } = {}): Promise<any> {
-  const script = `
+export const LIST_TAGS_SCRIPT = `
     const statusMap = {
       'active': Tag.Status.Active,
       'on_hold': Tag.Status.OnHold,
@@ -23,7 +22,7 @@ export async function listTags(params: { status?: string; sortBy?: string; limit
     const sortBy = args.sortBy || 'name';
     tags.sort((a, b) => {
       if (sortBy === 'taskCount') {
-        return b.availableTaskCount - a.availableTaskCount;
+        return b.availableTasks.length - a.availableTasks.length;
       }
       return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
     });
@@ -35,17 +34,19 @@ export async function listTags(params: { status?: string; sortBy?: string; limit
       id: t.id.primaryKey,
       name: t.name,
       parentName: (t.parent && t.parent.name && t.parent !== tags.library) ? t.parent.name : null,
-      availableTaskCount: t.availableTaskCount,
+      availableTaskCount: t.availableTasks.length,
       status: statusNameMap[t.status] || 'active'
     }));
 
     return JSON.stringify({ success: true, tags: result, count: result.length });
   `;
-  return await runOmniJs(script, params);
+
+export async function listTags(params: { status?: string; sortBy?: string; limit?: number } = {}): Promise<any> {
+
+  return await runOmniJs(LIST_TAGS_SCRIPT, params, { readOnly: true });
 }
 
-export async function searchTags(params: { query: string; limit?: number }): Promise<any> {
-  const script = `
+export const SEARCH_TAGS_SCRIPT = `
     const query = args.query.toLowerCase();
     const limit = args.limit || 50;
 
@@ -63,13 +64,16 @@ export async function searchTags(params: { query: string; limit?: number }): Pro
       id: t.id.primaryKey,
       name: t.name,
       parentName: (t.parent && t.parent.name && t.parent !== tags.library) ? t.parent.name : null,
-      availableTaskCount: t.availableTaskCount,
+      availableTaskCount: t.availableTasks.length,
       status: statusNameMap[t.status] || 'active'
     }));
 
     return JSON.stringify({ success: true, tags: result, count: result.length });
   `;
-  return await runOmniJs(script, params);
+
+export async function searchTags(params: { query: string; limit?: number }): Promise<any> {
+
+  return await runOmniJs(SEARCH_TAGS_SCRIPT, params, { readOnly: true });
 }
 
 export async function createTag(params: { name: string; parent?: string }): Promise<any> {

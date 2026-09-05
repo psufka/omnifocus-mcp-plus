@@ -1,3 +1,4 @@
+import { OMNIJS_TASK_QUERY_HELPERS } from '../../utils/taskQueryHelpers.js';
 import { runOmniJs } from '../../utils/scriptExecution.js';
 
 /**
@@ -26,6 +27,8 @@ export type AnalysisKind =
   | 'stalled_projects';
 
 export interface AnalyzeParams {
+  includeProjectRoots?: boolean;
+  dateMode?: 'direct' | 'effective';
   analysis: AnalysisKind;
   velocity?: { days?: number };
   overdueClusters?: { topN?: number };
@@ -64,17 +67,9 @@ export const STALLED_PROJECT_ROW_CAP = 50;
 // ---------------------------------------------------------------------------
 
 export const ANALYZE_SCRIPT = `
+  ${OMNIJS_TASK_QUERY_HELPERS}
   function __isFinished(t) {
     return t.taskStatus === Task.Status.Completed || t.taskStatus === Task.Status.Dropped;
-  }
-
-  // Project ROOT tasks are members of the global flattenedTasks collection
-  // (verified live: 38 projects contributed 38 extra entries to a 708-task
-  // database). Counting them would report every project as one more task, so
-  // every task-level metric filters them out. Task.project is non-null only on
-  // a root task.
-  function __isRealTask(t) {
-    return t.project === null || t.project === undefined;
   }
 
   function __iso(d) { return d ? d.toISOString() : null; }
@@ -105,7 +100,7 @@ export const ANALYZE_SCRIPT = `
 
   var analysis = args.analysis;
   var now = new Date();
-  var allTasks = flattenedTasks.filter(__isRealTask);
+  var allTasks = __queryTasks(args.includeProjectRoots);
 
   if (analysis === 'health_snapshot') {
     var incomplete = allTasks.filter(function (t) { return !__isFinished(t); });
@@ -117,7 +112,7 @@ export const ANALYZE_SCRIPT = `
 
     var overdue = 0, dueToday = 0, flagged = 0, untagged = 0, noEstimate = 0, inboxIncomplete = 0;
     incomplete.forEach(function (t) {
-      var due = t.dueDate;
+      var due = __queryDate(t, 'dueDate', args.dateMode || 'direct');
       if (due) {
         if (due < now) { overdue++; }
         if (due >= todayStart && due < tomorrowStart) { dueToday++; }
@@ -145,6 +140,7 @@ export const ANALYZE_SCRIPT = `
 
     return JSON.stringify({
       success: true,
+      dateMode: args.dateMode || 'direct', includeProjectRoots: args.includeProjectRoots === true,
       analysis: 'health_snapshot',
       generatedIso: __iso(now),
       completedWindowStartIso: __iso(completedWindowStart),
@@ -200,6 +196,7 @@ export const ANALYZE_SCRIPT = `
 
     return JSON.stringify({
       success: true,
+      dateMode: args.dateMode || 'direct', includeProjectRoots: args.includeProjectRoots === true,
       analysis: 'velocity',
       days: days,
       windowStartIso: __iso(windowStart),
@@ -218,7 +215,7 @@ export const ANALYZE_SCRIPT = `
 
     allTasks.forEach(function (t) {
       if (__isFinished(t)) { return; }
-      var due = t.dueDate;
+      var due = __queryDate(t, 'dueDate', args.dateMode || 'direct');
       if (!due || due >= now) { return; }
       totalOverdue++;
       var ms = due.getTime();
@@ -264,6 +261,7 @@ export const ANALYZE_SCRIPT = `
 
     return JSON.stringify({
       success: true,
+      dateMode: args.dateMode || 'direct', includeProjectRoots: args.includeProjectRoots === true,
       analysis: 'overdue_clusters',
       generatedIso: __iso(now),
       totalOverdue: totalOverdue,
@@ -320,6 +318,7 @@ export const ANALYZE_SCRIPT = `
 
     return JSON.stringify({
       success: true,
+      dateMode: args.dateMode || 'direct', includeProjectRoots: args.includeProjectRoots === true,
       analysis: 'stalled_projects',
       generatedIso: __iso(now),
       inactiveDays: inactiveDays,
@@ -424,9 +423,7 @@ export function renderHealthSnapshot(data: any): string {
   lines.push(`| Active with no next action | ${data.activeProjectsNoNextAction ?? 0} |`);
   lines.push('');
   lines.push(
-    '_Definitions: task counts exclude project root tasks. "Overdue" and "Due today" count a ' +
-    "task's OWN due date only — a due date inherited from its project or parent (the effective " +
-    'due date) is not counted. "Overdue" and "Due today" overlap ' +
+    '_Definitions: project roots ' + (data.includeProjectRoots ? 'included' : 'excluded') + '. Dates: ' + (data.dateMode || 'direct') + '. "Overdue" and "Due today" overlap ' +
     'for a task whose due time already passed today. "Completed in last 7 days" counts ' +
     `completions on or after ${localDate(data.completedWindowStartIso)} (local). ` +
     '"Active with no next action" is project.nextTask === null — it means the project has remaining ' +
@@ -639,6 +636,8 @@ export function renderStalledProjects(data: any): string {
 
 export function buildScriptArgs(params: AnalyzeParams): Record<string, any> {
   return {
+    dateMode: params.dateMode || 'direct',
+    includeProjectRoots: params.includeProjectRoots === true,
     analysis: params.analysis,
     days: params.velocity?.days ?? DEFAULT_VELOCITY_DAYS,
     inactiveDays: params.stalledProjects?.inactiveDays ?? DEFAULT_INACTIVE_DAYS,

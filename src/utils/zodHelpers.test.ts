@@ -19,9 +19,20 @@ test('requiredIsoDate rejects garbage and impossible dates', () => {
   }
 });
 
-test('requiredIsoDate rejects the empty string (unlike optionalIsoDate)', () => {
+test('empty dates are only accepted with the explicit edit clear sentinel', () => {
   assert.equal(requiredIsoDate('d').safeParse('').success, false);
-  assert.equal(optionalIsoDate('d').safeParse('').success, true);
+  assert.equal(optionalIsoDate('d').safeParse('').success, false);
+  assert.equal(optionalIsoDate('d', { allowEmpty: true }).safeParse('').success, true);
+});
+
+test('ISO validation rejects rollover dates and ambiguous non-ISO strings', () => {
+  for (const bad of ['2026-02-31', '2026-02-29', '1900-02-29', '2026-04-31T09:00:00-05:00', '1', '05/06/2026', '2026-03-05T24:00:00', '2026-03-05T09:00:00+24:00']) {
+    assert.equal(optionalIsoDate('date').safeParse(bad).success, false, bad);
+    assert.equal(requiredIsoDate('date').safeParse(bad).success, false, bad);
+  }
+  for (const good of ['2024-02-29', '2000-02-29', '2026-03-08T01:30:00-06:00', '2026-03-08T03:30:00-05:00', '2026-09-05T14:30:00.123Z']) {
+    assert.equal(requiredIsoDate('date').safeParse(good).success, true, good);
+  }
 });
 
 test('requiredIsoDate rejects a missing value', () => {

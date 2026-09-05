@@ -8,7 +8,7 @@ export async function getTodayCompletedTasks(options: GetTodayCompletedTasksOpti
   try {
     const { limit = 20 } = options;
     
-    const result = await executeOmniFocusScript('@todayCompletedTasks.js', { limit });
+    const result = await executeOmniFocusScript('@todayCompletedTasks.js', { limit }, { readOnly: true });
     
     
     // If result is an object, format it

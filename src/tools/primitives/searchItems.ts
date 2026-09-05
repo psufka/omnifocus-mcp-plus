@@ -1,9 +1,11 @@
+import { OMNIJS_TASK_QUERY_HELPERS } from '../../utils/taskQueryHelpers.js';
 import { runOmniJs } from '../../utils/scriptExecution.js';
 
 export type SearchItemType = 'task' | 'project' | 'folder' | 'tag';
 export type SearchScope = 'names' | 'notes' | 'both';
 
 export interface SearchItemsParams {
+  includeProjectRoots?: boolean;
   query: string;
   types?: SearchItemType[];
   searchIn?: SearchScope;
@@ -24,6 +26,7 @@ export const DEFAULT_LIMIT_PER_TYPE = 20;
  * interpolated into the source.
  */
 export const SEARCH_ITEMS_SCRIPT = `
+  ${OMNIJS_TASK_QUERY_HELPERS}
   var query = String(args.query === undefined || args.query === null ? '' : args.query).toLowerCase();
   var requested = (args.types && args.types.length > 0) ? args.types : ['task', 'project', 'folder', 'tag'];
   var searchIn = args.searchIn === 'notes' || args.searchIn === 'both' ? args.searchIn : 'names';
@@ -94,7 +97,7 @@ export const SEARCH_ITEMS_SCRIPT = `
   var results = {};
 
   if (wanted('task')) {
-    results.task = collect(flattenedTasks, function (task) {
+    results.task = collect(__queryTasks(args.includeProjectRoots), function (task) {
       var status = taskStatusName[task.taskStatus] || 'Unknown';
       if (!includeCompleted && (status === 'Completed' || status === 'Dropped')) { return null; }
       var where = matchedIn(task.name, task.note, true);
@@ -301,6 +304,7 @@ export async function searchItems(params: SearchItemsParams): Promise<string> {
     // Pure read: the script never writes to the database.
     const result = await runOmniJs(SEARCH_ITEMS_SCRIPT, {
       query,
+      includeProjectRoots: params.includeProjectRoots,
       types: params.types && params.types.length > 0 ? params.types : ALL_SEARCH_TYPES,
       searchIn: params.searchIn ?? 'names',
       includeCompleted: params.includeCompleted === true,

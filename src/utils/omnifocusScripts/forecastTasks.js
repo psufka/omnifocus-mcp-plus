@@ -1,8 +1,10 @@
 // OmniJS script to get forecast tasks from OmniFocus
 (() => {
+  /* @task-query-helpers */
   try {
     const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
     // `days` counts today as day 1: days = 7 covers today through today + 6.
+    const dateMode = args.dateMode || 'effective';
     const days = Math.max(1, args.days || 7);
     const hideCompleted = args.hideCompleted !== undefined ? args.hideCompleted : true;
     const includeDeferredOnly = args.includeDeferredOnly !== undefined ? args.includeDeferredOnly : false;
@@ -39,6 +41,7 @@
     }
     
     const exportData = {
+      dateMode: dateMode, includeProjectRoots: args.includeProjectRoots === true,
       exportDate: new Date().toISOString(),
       tasksByDate: {}
     };
@@ -55,7 +58,7 @@
     console.log(`Looking for forecast tasks from ${today.toISOString()} to ${endDate.toISOString()}`);
     
     // Get all active tasks
-    let allTasks = flattenedTasks;
+    let allTasks = __queryTasks(args.includeProjectRoots);
     
     // Filter by completion status if needed
     if (hideCompleted) {
@@ -77,8 +80,8 @@
 
         // Fall back to the inherited (effective) date when the task has no date
         // of its own — same convention filter_tasks uses when rendering dates.
-        const rawDueDate = task.dueDate || task.effectiveDueDate || null;
-        const rawDeferDate = task.deferDate || task.effectiveDeferDate || null;
+        const rawDueDate = __queryDate(task, 'dueDate', dateMode);
+        const rawDeferDate = __queryDate(task, 'deferDate', dateMode);
 
         // Check if task has due date in range.
         // Skipped entirely when only deferred tasks were requested.
@@ -99,7 +102,7 @@
           }
 
           if (shouldInclude) {
-            usedEffectiveDate = !task.dueDate;
+            usedEffectiveDate = dateMode === 'effective' && (!task.dueDate || task.dueDate.getTime() !== rawDueDate.getTime());
           }
         }
 
@@ -112,7 +115,7 @@
             shouldInclude = true;
             taskDate = deferDate;
             isDue = false;
-            usedEffectiveDate = !task.deferDate;
+            usedEffectiveDate = dateMode === 'effective' && (!task.deferDate || task.deferDate.getTime() !== rawDeferDate.getTime());
           }
         }
 

@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { editItem, EditItemParams } from '../primitives/editItem.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
@@ -12,14 +13,18 @@ export const schema = z.object({
   // Common editable fields
   newName: z.string().optional().describe("New name for the item"),
   newNote: z.string().optional().describe("New note for the item"),
-  newDueDate: optionalIsoDate("Due date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear."),
-  newDeferDate: optionalIsoDate("Defer date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear."),
-  newPlannedDate: optionalIsoDate("Planned date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear. Requires an OmniFocus build with planned dates; unsupported builds return a warning instead of failing."),
+  newDueDate: optionalIsoDate("Due date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear.", { allowEmpty: true }),
+  newDeferDate: optionalIsoDate("Defer date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear.", { allowEmpty: true }),
+  newPlannedDate: optionalIsoDate("Planned date. Full ISO 8601 with timezone (e.g., 2026-03-05T09:00:00-06:00), or a bare YYYY-MM-DD which is interpreted as local midnight on that day. Set to empty string to clear. Requires an OmniFocus build with planned dates; unsupported builds return a warning instead of failing.", { allowEmpty: true }),
   newFlagged: z.boolean().optional().describe("Set flagged status (set to false for no flag, true for flag)"),
   newEstimatedMinutes: z.number().optional().describe("New estimated minutes"),
   addTags: z.array(z.string()).optional().describe("Tags to add (works for tasks and projects). Tags that don't exist yet are created."),
   removeTags: z.array(z.string()).optional().describe("Tags to remove (works for tasks and projects)"),
   replaceTags: z.array(z.string()).optional().describe("Tags to replace all existing tags with (works for tasks and projects). Pass an empty array to clear every tag; omit the field to leave tags unchanged."),
+  addTagIds: z.array(z.string().min(1)).optional().describe('Exact tag IDs to add; may be combined with addTags paths.'),
+  removeTagIds: z.array(z.string().min(1)).optional().describe('Exact tag IDs to remove.'),
+  replaceTagIds: z.array(z.string().min(1)).optional().describe('Exact tag IDs to replace all tags with; may be combined with replaceTags paths.'),
+  dryRun: z.boolean().optional().describe('Resolve the complete edit and preview changes without writing.'),
   dropAllOccurrences: z.boolean().optional().describe("Only meaningful with newStatus: 'dropped' or newProjectStatus: 'dropped'. Defaults to false, which drops just the current occurrence of a repeating item; set true to drop every future occurrence as well."),
 
   // Task-specific fields (rejected with an error when itemType is 'project')
@@ -61,6 +66,9 @@ export async function handler(
 
     // Call the editItem function
     const result = await deps.editItem(args as EditItemParams);
+    recordToolData(result);
+
+    if (result.dryRun) return { content: [{ type: 'text' as const, text: `Would edit ${args.itemType} ${result.name} (${result.id}): ${JSON.stringify(result.changes)}` }], structuredContent: { success: true, tool: 'edit_item', data: result } };
 
     if (result.success) {
       // Item was edited successfully

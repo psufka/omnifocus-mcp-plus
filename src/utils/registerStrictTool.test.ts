@@ -219,3 +219,37 @@ test('cacheable without readOnly annotation is a registration error', () => {
     /cacheable but not annotated readOnlyHint/
   );
 });
+
+test('a read started before a mutation cannot refill the cache afterwards; fresh bypasses hits', async () => {
+  cacheClear();
+  const server = new McpServer({ name: 'race', version: '0' });
+  let value = 'before', reads = 0;
+  let entered!: () => void, resume!: () => void;
+  const started = new Promise<void>(r => { entered = r; });
+  const blocked = new Promise<void>(r => { resume = r; });
+  registerStrictTool(server, 'read', 'read', z.object({}), async () => {
+    const snapshot = value;
+    if (++reads === 1) { entered(); await blocked; }
+    return { content: [{ type: 'text', text: snapshot }] };
+  }, { annotations: READ_ONLY_TOOL, cacheable: true });
+  registerStrictTool(server, 'write', 'write', z.object({}), async () => {
+    value = 'after'; return { content: [{ type: 'text', text: 'written' }] };
+  }, { annotations: MUTATING_TOOL });
+  const client = await connectedClient(server);
+  try {
+    const first = client.callTool({ name: 'read', arguments: {} });
+    await started;
+    await client.callTool({ name: 'write', arguments: {} });
+    resume(); await first;
+    const next = await client.callTool({ name: 'read', arguments: {} });
+    assert.equal((next.content as any)[0].text, 'after');
+    assert.equal(reads, 2);
+    const cached: any = await client.callTool({ name: 'read', arguments: {} });
+    assert.equal(reads, 2);
+    assert.equal(cached.structuredContent.meta.cache.hit, true);
+    await client.callTool({ name: 'read', arguments: { fresh: true } });
+    assert.equal(reads, 3);
+    const list = await client.listTools();
+    assert.ok(list.tools.every(t => t.outputSchema));
+  } finally { await client.close(); await server.close(); cacheClear(); }
+});

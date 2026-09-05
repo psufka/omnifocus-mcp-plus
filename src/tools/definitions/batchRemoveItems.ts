@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { batchRemoveItems, BatchRemoveItemsParams } from '../primitives/batchRemoveItems.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
@@ -28,6 +29,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
 
     // Call the batchRemoveItems function
     const result = await batchRemoveItems(args.items as BatchRemoveItemsParams[], { dryRun: args.dryRun });
+    recordToolData(result);
 
     // Nothing was attempted (e.g. empty items array) — no per-item detail exists.
     if (result.results.length === 0) {

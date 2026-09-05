@@ -55,7 +55,7 @@ export async function listNotifications(params: { taskId?: string; taskName?: st
     return { success: false, error: "Either taskId or taskName must be provided" };
   }
 
-  return await runOmniJs(LIST_NOTIFICATIONS_SCRIPT, params);
+  return await runOmniJs(LIST_NOTIFICATIONS_SCRIPT, params, { readOnly: true });
 }
 
 export const ADD_NOTIFICATION_SCRIPT = `

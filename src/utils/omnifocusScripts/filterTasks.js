@@ -17,9 +17,12 @@
 // The nameMatches pattern is compiled with the RegExp CONSTRUCTOR from that
 // injected value — it is never spliced into a regex literal in this source.
 (() => {
+  /* @task-query-helpers */
   try {
     // Get injected arguments
     const args = typeof injectedArgs !== 'undefined' ? injectedArgs : {};
+    const dateMode = args.dateMode || 'direct';
+    const weekStartsOn = args.weekStartsOn || 'sunday';
 
     function toArray(value) {
       if (value === undefined || value === null) return [];
@@ -160,7 +163,7 @@
     // decide the task's fate for an unrelated filter.
     function taskDate(task, key) {
       try {
-        return toDate(task[key]);
+        return toDate(__queryDate(task, key, dateMode));
       } catch (error) {
         return null;
       }
@@ -190,14 +193,11 @@
     const tomorrowStart = addDays(todayStart, 1);
     const yesterdayStart = addDays(todayStart, -1);
 
-    // Completion windows: "this week" starts at the most recent Monday 00:00
-    // local, "this month" at the 1st 00:00 local.
-    const completedWeekStart = addDays(todayStart, (todayStart.getDay() + 6) % 7 * -1);
+    // All week predicates share one local-calendar boundary.
+    const weekOffset = (todayStart.getDay() + (weekStartsOn === 'monday' ? 6 : 0)) % 7;
+    const weekStart = addDays(todayStart, -weekOffset);
+    const completedWeekStart = weekStart;
     const completedMonthStart = startOfMonth(now);
-
-    // Due / defer / planned windows use a Sunday-start week and the calendar
-    // month, matching the client-side helpers in filterTasks.ts.
-    const weekStart = addDays(todayStart, todayStart.getDay() * -1);
     const weekEnd = addDays(weekStart, 7);
     const monthStart = startOfMonth(now);
     const nextMonthStart = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
@@ -577,7 +577,7 @@
     if (notCondition) appliedFilters.push("not");
 
     // Get all tasks
-    const allTasks = flattenedTasks;
+    const allTasks = __queryTasks(args.includeProjectRoots);
 
     // Determine whether completed tasks are needed
     const wantsCompletedTasks = filters.completedToday || filters.completedYesterday ||
@@ -813,7 +813,7 @@
           if (filters.completedYesterday && !isYesterday(completionDate)) {
             return false;
           }
-          if (filters.completedThisWeek && !(completionDate && completionDate >= completedWeekStart)) {
+          if (filters.completedThisWeek && !(completionDate && completionDate >= completedWeekStart && completionDate < weekEnd)) {
             return false;
           }
           if (filters.completedThisMonth && !(completionDate && completionDate >= completedMonthStart)) {
@@ -863,6 +863,7 @@
     // of this tool actually lives.
     if (filters.countOnly) {
       return JSON.stringify({
+        dateMode: dateMode, weekStartsOn: weekStartsOn, includeProjectRoots: args.includeProjectRoots === true,
         countOnly: true,
         count: matchedCount,
         totalCount: baseTasks.length,
@@ -923,6 +924,7 @@
     // Build return data
     const exportData = {
       exportDate: new Date().toISOString(),
+      dateMode: dateMode, weekStartsOn: weekStartsOn, includeProjectRoots: args.includeProjectRoots === true,
       tasks: [],
       totalCount: baseTasks.length,
       matchedCount: matchedCount,

@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import { findSimilarTasks } from '../primitives/findSimilarTasks.js';
@@ -24,6 +25,7 @@ function describeMatch(match: Scored<SimilarTaskCandidate>, rank: number): strin
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await findSimilarTasks(args);
+    recordToolData(result);
 
     if (!result.success) {
       return {

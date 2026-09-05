@@ -3,10 +3,12 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { AddProjectParams } from './addProject.js';
+import { normalizeItemDates } from './addOmniFocusTask.js';
+import { ADD_PROJECT_SCRIPT, AddProjectParams } from './addProject.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, 'addProject.ts'), 'utf8');
+const creation = readFileSync(join(here, 'addOmniFocusTask.ts'), 'utf8');
 
 test('AddProjectParams interface accepts all expected fields', () => {
   // Type-level test: ensure the interface shape is correct
@@ -32,25 +34,20 @@ test('addProject resolves the folder with the ambiguity-guarded helper', () => {
   // Old behaviour took flattenedFolders.filter(...)[0], silently picking one of
   // several same-named folders.
   assert.doesNotMatch(src, /flattenedFolders\.filter\(f => f\.name === args\.folderName\)\[0\]/, 'addProject still takes the first same-named folder');
-  assert.match(src, /__resolveByNameOrId\(allFolders, args\.folderName, 'Folder'\)/, 'addProject should resolve the folder via __resolveByNameOrId');
+  assert.match(ADD_PROJECT_SCRIPT, /__resolveByNameOrId\(flattenedFolders, spec\.folderName, 'Folder'\)/, 'addProject should resolve the folder via __resolveByNameOrId');
   assert.match(src, /OMNIJS_LOOKUP_HELPERS/, 'addProject should prepend the shared lookup helpers');
 });
 
 test('addProject surfaces a failed plannedDate write instead of swallowing it', () => {
   assert.doesNotMatch(src, /catch\(e\) \{\}/, 'addProject still has an empty catch around plannedDate');
-  assert.match(src, /warnings\.push\('plannedDate was not set: ' \+ e\.message\)/, 'plannedDate failure should be collected as a warning');
+  assert.match(ADD_PROJECT_SCRIPT, /warnings\.push\('plannedDate was not applied/, 'plannedDate failure should be collected as a warning');
   assert.match(src, /warnings: warnings/, 'script result should carry the warnings array');
 });
 
 test('addProject normalizes date strings to local time before OmniJS sees them', () => {
   // Bare YYYY-MM-DD parses as UTC midnight — the previous evening west of UTC.
-  assert.match(src, /toLocalDateTimeString/, 'addProject should import toLocalDateTimeString');
-  for (const field of ['dueDate', 'deferDate', 'plannedDate']) {
-    assert.match(
-      src,
-      new RegExp(`${field}: toLocalDateTimeString\\(params\\.${field}\\)`),
-      `${field} should be normalized before being passed to runOmniJs`
-    );
-  }
-  assert.match(src, /runOmniJs\(script, normalized\)/, 'runOmniJs should receive the normalized params');
+  assert.match(src, /runOmniJs\(ADD_PROJECT_SCRIPT, normalizeItemDates\(params\)\)/);
+  assert.match(creation, /toLocalDateTimeString/);
+  const normalized = normalizeItemDates({ dueDate: '2026-03-15', deferDate: '2026-03-10', plannedDate: '2026-03-12' });
+  assert.deepEqual(normalized, { dueDate: '2026-03-15T00:00:00', deferDate: '2026-03-10T00:00:00', plannedDate: '2026-03-12T00:00:00' });
 });

@@ -1,5 +1,6 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
 import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
+import { OMNIJS_TAG_HELPERS } from '../../utils/omniJsTags.js';
 import { toLocalDateTimeString } from '../../utils/localDate.js';
 
 // Interface for task creation parameters
@@ -12,6 +13,7 @@ export interface AddOmniFocusTaskParams {
   flagged?: boolean;
   estimatedMinutes?: number;
   tags?: string[]; // Tag names
+  tagIds?: string[];
   projectName?: string; // Project name to add task to
   parentTaskId?: string; // Parent task ID for subtask creation
   parentTaskName?: string; // Parent task name for subtask creation (alternative to ID)
@@ -82,6 +84,7 @@ export function validateAddTaskParams(params: AddOmniFocusTaskParams): { valid: 
  * literals, backslashes or '$' so the runOmniJs escaping layer leaves it alone.
  */
 export const OMNIJS_PLACEMENT_HELPERS = `
+  ${OMNIJS_TAG_HELPERS}
   // A placement carries an OmniJS insertion point in .location that must never
   // be serialized (JSON.stringify on an OmniJS object yields {}).
   function __publicPlacement(p) {
@@ -189,16 +192,8 @@ export const OMNIJS_PLACEMENT_HELPERS = `
 
   // Pure read: which of these tag names exist already, and which would have to
   // be created. Lets a dry run report new tags without creating any.
-  function __resolveTagsSpec(tagNames) {
-    var existing = [];
-    var missing = [];
-    if (!tagNames) { return { existing: existing, missing: missing }; }
-    for (var ti = 0; ti < tagNames.length; ti++) {
-      var tagName = tagNames[ti];
-      var tag = flattenedTags.filter(function (t) { return t.name === tagName; })[0];
-      if (tag) { existing.push(tagName); } else { missing.push(tagName); }
-    }
-    return { existing: existing, missing: missing };
+  function __resolveTagsSpec(tagNames, tagIds) {
+    return __resolveTagPlan(tagNames, tagIds, true);
   }
 
   // Returns { exists, verified, actual, warning }. exists=false means the write
@@ -277,16 +272,8 @@ export const OMNIJS_PLACEMENT_HELPERS = `
  * escaping layer leaves it alone.
  */
 export const OMNIJS_CREATE_TASK_HELPER = `
-  function __applyTagsTo(item, tagNames, created) {
-    for (var ti = 0; ti < tagNames.length; ti++) {
-      var tagName = tagNames[ti];
-      var tag = flattenedTags.filter(function (t) { return t.name === tagName; })[0];
-      if (!tag) {
-        tag = new Tag(tagName);
-        if (created) { created.push({ obj: tag, kind: 'tag', name: tagName }); }
-      }
-      item.addTag(tag);
-    }
+  function __applyTagsTo(item, plan, created) {
+    __materializeTagPlan(plan, created).forEach(function (tag) { item.addTag(tag); });
   }
 
   function __setPlannedDate(item, value, warnings) {
@@ -297,14 +284,14 @@ export const OMNIJS_CREATE_TASK_HELPER = `
     }
   }
 
-  function __applyTaskFields(task, spec, warnings, created) {
+  function __applyTaskFields(task, spec, warnings, created, tagPlan) {
     if (spec.note !== undefined) { task.note = spec.note; }
     if (spec.dueDate) { task.dueDate = new Date(spec.dueDate); }
     if (spec.deferDate) { task.deferDate = new Date(spec.deferDate); }
     if (spec.plannedDate) { __setPlannedDate(task, spec.plannedDate, warnings); }
     if (spec.flagged !== undefined) { task.flagged = spec.flagged; }
     if (spec.estimatedMinutes !== undefined) { task.estimatedMinutes = spec.estimatedMinutes; }
-    if (spec.tags && spec.tags.length > 0) { __applyTagsTo(task, spec.tags, created); }
+    __applyTagsTo(task, tagPlan, created);
   }
 
   function __createTask(spec, warnings, created, presetPlacement) {
@@ -315,12 +302,45 @@ export const OMNIJS_CREATE_TASK_HELPER = `
       placement = resolved.placement;
     }
 
+    var tagPlan = __resolveTagsSpec(spec.tags, spec.tagIds);
+    if (tagPlan.error) return { error: tagPlan.error };
     var task = new Task(spec.name, placement.location);
     if (created) { created.push({ obj: task, kind: 'task', name: spec.name }); }
 
-    __applyTaskFields(task, spec, warnings, created);
+    __applyTaskFields(task, spec, warnings, created, tagPlan);
 
-    return { task: task, placement: placement };
+    return { task: task, placement: placement, tagPlan: tagPlan };
+  }
+`;
+
+/**
+ * OmniJS source for `__createProject(spec, warnings, created, presetPlacement)`.
+ * Shared by single-project and batch creation inside one OmniJS evaluation. Requires OMNIJS_PLACEMENT_HELPERS and OMNIJS_CREATE_TASK_HELPER.
+ */
+export const OMNIJS_CREATE_PROJECT_HELPER = `
+  function __createProject(spec, warnings, created, presetPlacement) {
+    var placement = presetPlacement;
+    if (!placement) {
+      var resolved = __resolveProjectPlacement(spec);
+      if (resolved.error) { return { error: resolved.error }; }
+      placement = resolved.placement;
+    }
+
+    var tagPlan = __resolveTagsSpec(spec.tags, spec.tagIds);
+    if (tagPlan.error) return { error: tagPlan.error };
+    var project = new Project(spec.name, placement.location);
+    if (created) { created.push({ obj: project, kind: 'project', name: spec.name }); }
+
+    if (spec.note !== undefined) { project.note = spec.note; }
+    if (spec.dueDate) { project.dueDate = new Date(spec.dueDate); }
+    if (spec.deferDate) { project.deferDate = new Date(spec.deferDate); }
+    if (spec.plannedDate) { __setPlannedDate(project, spec.plannedDate, warnings); }
+    if (spec.flagged !== undefined) { project.flagged = spec.flagged; }
+    if (spec.estimatedMinutes !== undefined) { project.estimatedMinutes = spec.estimatedMinutes; }
+    project.sequential = spec.sequential === true;
+    __applyTagsTo(project, tagPlan, created);
+
+    return { project: project, placement: placement, tagPlan: tagPlan };
   }
 `;
 
@@ -341,6 +361,10 @@ export const ADD_TASK_SCRIPT = `
   // to. Background sync mutates the database between script invocations, so a
   // second round-trip would be verifying a different database state.
   const check = __verifyTaskPlacement(created.task, created.placement);
+  if (!__verifyTagPlan(created.task, created.tagPlan)) {
+    check.verified = false;
+    check.warning = 'Tag verification failed: requested tag IDs were not all retained. Check mutually exclusive tag groups.';
+  }
   if (!check.exists) {
     return JSON.stringify({ success: false, verified: false, error: check.warning });
   }
@@ -353,13 +377,15 @@ export const ADD_TASK_SCRIPT = `
     verified: check.verified,
     warning: check.warning,
     requestedPlacement: __publicPlacement(created.placement),
-    actualPlacement: __publicPlacement(check.actual)
+    actualPlacement: __publicPlacement(check.actual),
+    tagIds: __tagIds(created.task)
   });
 `;
 
 export interface AddOmniFocusTaskResult {
   success: boolean;
   taskId?: string;
+  tagIds?: string[];
   name?: string;
   warnings?: string[];
   error?: string;
@@ -386,6 +412,7 @@ export async function addOmniFocusTask(params: AddOmniFocusTaskParams): Promise<
     return {
       success: result.success,
       taskId: result.taskId,
+      tagIds: result.tagIds,
       name: result.name,
       warnings: Array.isArray(result.warnings) && result.warnings.length > 0 ? result.warnings : undefined,
       error: result.error,

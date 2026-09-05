@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import {
   convertTaskToProject,
@@ -35,6 +36,7 @@ export const schema = z.object({
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await convertTaskToProject(args as ConvertTaskToProjectParams);
+    recordToolData(result);
 
     if (!result.success) {
       return {

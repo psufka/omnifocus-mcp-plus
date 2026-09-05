@@ -1,3 +1,4 @@
+import { recordToolData } from '../../utils/toolResult.js';
 import { z } from 'zod';
 import {
   manageReviews,
@@ -168,6 +169,7 @@ function renderSetSchedule(result: ManageReviewsResult): string {
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
     const result = await manageReviews(args as ManageReviewsParams);
+    recordToolData(result);
 
     if (!result.success) {
       // mark_reviewed can fail per project; show the rows so a partial batch is

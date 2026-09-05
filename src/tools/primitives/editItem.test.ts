@@ -219,7 +219,7 @@ test('editItem script treats replaceTags: [] as "clear all tags"', () => {
 });
 
 test('editItem script wires tag operations for projects as well as tasks', () => {
-  const tagBlock = primitiveSource.indexOf('--- Tag operations (tasks AND projects) ---');
+  const tagBlock = primitiveSource.indexOf('Tag identities were resolved before any write');
   const taskOnlyBlock = primitiveSource.indexOf('--- Task-specific updates ---');
 
   assert.ok(tagBlock > 0, 'expected a shared tag-operations block');
@@ -235,7 +235,7 @@ test('editItem drops only the current occurrence unless dropAllOccurrences is tr
 
 test('editItem normalizes bare dates to local time before running the script', () => {
   assert.match(primitiveSource, /toLocalDateTimeString/, 'date args are not normalized to local time');
-  assert.match(primitiveSource, /runOmniJs\(script, normalizeDateParams\(params\)\)/, 'script still receives raw date args');
+  assert.match(primitiveSource, /runOmniJs\(EDIT_ITEM_SCRIPT, normalizeDateParams\(params\)/, 'script still receives raw date args');
   assert.doesNotMatch(definitionSource, /will display on the wrong day/, 'schema still warns that bare dates are buggy');
 });
 
@@ -258,9 +258,8 @@ test('editItem read-back compares dates by timestamp, not by string', () => {
 
 test('editItem read-back compares tags by set equality', () => {
   assert.match(primitiveSource, /const sameSet = function/, 'missing set-equality helper for tags');
-  assert.match(primitiveSource, /recordMismatch\('replaceTags'/, 'replaceTags is not verified');
-  assert.match(primitiveSource, /recordMismatch\('addTags'/, 'addTags is not verified');
-  assert.match(primitiveSource, /recordMismatch\('removeTags'/, 'removeTags is not verified');
+  assert.match(primitiveSource, /sameSet\(expectedTagIds, currentTags\)/, 'tag identities are not compared');
+  assert.match(primitiveSource, /__tagIds\(item\)/, 'verification must use identities rather than names');
 });
 
 test('editItem read-back reads project status from .status, not the root task status', () => {

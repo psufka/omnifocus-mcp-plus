@@ -1,4 +1,5 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_TAG_HELPERS } from '../../utils/omniJsTags.js';
 import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 import { toLocalDateTimeString } from '../../utils/localDate.js';
 
@@ -23,6 +24,10 @@ export interface EditItemParams {
   addTags?: string[];           // Tags to add (tasks and projects both support tags)
   removeTags?: string[];        // Tags to remove (tasks and projects both support tags)
   replaceTags?: string[];       // Tags to replace all existing tags with ([] clears every tag)
+  addTagIds?: string[];
+  removeTagIds?: string[];
+  replaceTagIds?: string[];
+  dryRun?: boolean;
   dropAllOccurrences?: boolean; // When dropping a repeating item, drop every future occurrence (default false)
 
   // Task-specific fields
@@ -71,6 +76,11 @@ export function validateEditItemParams(params: EditItemParams): { valid: boolean
       valid: false,
       error: 'Either id or name must be provided'
     };
+  }
+
+  if ((params.replaceTags !== undefined || params.replaceTagIds !== undefined) &&
+      [params.addTags, params.addTagIds, params.removeTags, params.removeTagIds].some(v => v !== undefined)) {
+    return { valid: false, error: 'Cannot combine replacement tags with add/remove tags.' };
   }
 
   const hasMoveTarget = hasTaskMoveTarget(params);
@@ -144,7 +154,7 @@ export function validateEditItemParams(params: EditItemParams): { valid: boolean
  * Without this the OmniJS `new Date(str)` call parses it as UTC midnight,
  * which lands on the previous day everywhere west of UTC.
  */
-function normalizeDateParams(params: EditItemParams): EditItemParams {
+export function normalizeDateParams(params: EditItemParams): EditItemParams {
   const normalized: EditItemParams = { ...params };
 
   for (const field of DATE_FIELDS) {
@@ -172,34 +182,9 @@ export interface EditItemMismatch {
   kind?: 'date';
 }
 
-/**
- * Edit a task or project in OmniFocus.
- *
- * The result is additive-only on purpose: `success`, `id`, `name`,
- * `changedProperties` and `warnings` keep their existing meaning (move_task
- * renders them), and `verified` / `mismatches` are new fields carrying the
- * post-write read-back. `verified: false` means the edit was applied but at
- * least one field did not read back as requested — callers should surface that
- * rather than report a clean success.
- */
-export async function editItem(params: EditItemParams): Promise<{
-  success: boolean,
-  id?: string,
-  name?: string,
-  changedProperties?: string,
-  warnings?: string[],
-  verified?: boolean,
-  mismatches?: EditItemMismatch[],
-  error?: string
-}> {
-  try {
-    const validation = validateEditItemParams(params);
-    if (!validation.valid) {
-      return { success: false, error: validation.error };
-    }
-
-    const script = `
+export const EDIT_ITEM_SCRIPT = `
       ${OMNIJS_LOOKUP_HELPERS}
+      ${OMNIJS_TAG_HELPERS}
 
       const collection = args.itemType === 'task' ? flattenedTasks : flattenedProjects;
       const changedProperties = [];
@@ -304,6 +289,22 @@ export async function editItem(params: EditItemParams): Promise<{
         }
       }
 
+      const replacingTags = args.replaceTags !== undefined || args.replaceTagIds !== undefined;
+      const replacePlan = __resolveTagPlan(args.replaceTags, args.replaceTagIds, true);
+      const addPlan = __resolveTagPlan(args.addTags, args.addTagIds, true);
+      const removePlan = __resolveTagPlan(args.removeTags, args.removeTagIds, 'ignoreMissing');
+      for (const plan of [replacePlan, addPlan, removePlan]) {
+        if (plan.error) return JSON.stringify({ success: false, id: itemId, name: item.name, error: plan.error });
+      }
+      if (args.dryRun === true) {
+        const changes = {};
+        Object.keys(args).forEach(function (key) {
+          if (['id', 'name', 'itemType', 'dryRun'].indexOf(key) === -1) changes[key] = args[key];
+        });
+        return JSON.stringify({ success: true, id: itemId, name: item.name, dryRun: true,
+          status: 'wouldEdit', changes: changes, tagsToCreate: replacingTags ? replacePlan.missing : addPlan.missing });
+      }
+
       // =====================================================================
       // Phase 2 — every destination resolved; now apply the mutations.
       // =====================================================================
@@ -382,37 +383,26 @@ export async function editItem(params: EditItemParams): Promise<{
         changedProperties.push('estimated minutes');
       }
 
-      // --- Tag operations (tasks AND projects) ---
-      // OmniFocus projects carry tags on their root task and expose the same
-      // addTag/removeTag/clearTags methods as Task, so one code path serves both.
-      // replaceTags: [] means "clear every tag"; omitted means "leave tags alone".
-      if (args.replaceTags !== undefined) {
+      // Tag identities were resolved before any write. Build and verify the final ID set.
+      const expectedTagIds = replacingTags ? [] : __tagIds(item);
+      if (replacingTags) {
+        const tags = __materializeTagPlan(replacePlan);
         item.clearTags();
-        for (const tagName of args.replaceTags) {
-          let tag = flattenedTags.filter(t => t.name === tagName)[0];
-          if (!tag) tag = new Tag(tagName);
-          item.addTag(tag);
-        }
-        changedProperties.push(args.replaceTags.length === 0 ? 'tags (cleared)' : 'tags (replaced)');
+        tags.forEach(function (tag) { item.addTag(tag); expectedTagIds.push(tag.id.primaryKey); });
+        changedProperties.push(tags.length === 0 ? 'tags (cleared)' : 'tags (replaced)');
       } else {
-        if (args.addTags && args.addTags.length > 0) {
-          for (const tagName of args.addTags) {
-            let tag = flattenedTags.filter(t => t.name === tagName)[0];
-            if (!tag) tag = new Tag(tagName);
-            item.addTag(tag);
-          }
-          changedProperties.push('tags (added)');
-        }
-
-        if (args.removeTags && args.removeTags.length > 0) {
-          for (const tagName of args.removeTags) {
-            const tag = flattenedTags.filter(t => t.name === tagName)[0];
-            if (tag) {
-              item.removeTag(tag);
-            }
-          }
-          changedProperties.push('tags (removed)');
-        }
+        const additions = __materializeTagPlan(addPlan);
+        additions.forEach(function (tag) {
+          item.addTag(tag);
+          if (expectedTagIds.indexOf(tag.id.primaryKey) === -1) expectedTagIds.push(tag.id.primaryKey);
+        });
+        removePlan.entries.forEach(function (entry) {
+          item.removeTag(entry.tag);
+          const index = expectedTagIds.indexOf(entry.id);
+          if (index >= 0) expectedTagIds.splice(index, 1);
+        });
+        if (additions.length) changedProperties.push('tags (added)');
+        if (removePlan.entries.length) changedProperties.push('tags (removed)');
       }
 
       // --- Task-specific updates ---
@@ -507,7 +497,7 @@ export async function editItem(params: EditItemParams): Promise<{
         return true;
       };
       const currentTags = (function () {
-        try { return item.tags.map(t => t.name); } catch (e) { return []; }
+        try { return __tagIds(item); } catch (e) { return []; }
       })();
 
       // --- Moves ---
@@ -560,24 +550,11 @@ export async function editItem(params: EditItemParams): Promise<{
         recordMismatch('newEstimatedMinutes', args.newEstimatedMinutes, item.estimatedMinutes === undefined ? null : item.estimatedMinutes);
       }
 
-      // --- Tags (set equality; order is not meaningful) ---
-      if (args.replaceTags !== undefined) {
-        if (!sameSet(args.replaceTags, currentTags)) {
-          recordMismatch('replaceTags', args.replaceTags.join(', '), currentTags.join(', '));
-        }
-      } else {
-        if (args.addTags && args.addTags.length > 0) {
-          const missing = args.addTags.filter(t => currentTags.indexOf(t) === -1);
-          if (missing.length > 0) {
-            recordMismatch('addTags', args.addTags.join(', '), currentTags.join(', '));
-          }
-        }
-        if (args.removeTags && args.removeTags.length > 0) {
-          const lingering = args.removeTags.filter(t => currentTags.indexOf(t) !== -1);
-          if (lingering.length > 0) {
-            recordMismatch('removeTags', 'none of: ' + args.removeTags.join(', '), currentTags.join(', '));
-          }
-        }
+      // --- Tags: compare identities, including mutually exclusive group effects. ---
+      const tagsRequested = replacingTags || args.addTags !== undefined || args.addTagIds !== undefined ||
+        args.removeTags !== undefined || args.removeTagIds !== undefined;
+      if (tagsRequested && !sameSet(expectedTagIds, currentTags)) {
+        recordMismatch(replacingTags ? 'replaceTags' : (addPlan.entries.length ? 'addTags' : 'removeTags'), expectedTagIds, currentTags);
       }
 
       // --- Task status ---
@@ -636,6 +613,8 @@ export async function editItem(params: EditItemParams): Promise<{
         success: true,
         id: itemId,
         name: item.name,
+        tagIds: __tagIds(item),
+        changedFields: changedProperties,
         changedProperties: changedProperties.join(', '),
         warnings: warnings,
         verified: mismatches.length === 0,
@@ -643,11 +622,47 @@ export async function editItem(params: EditItemParams): Promise<{
       });
     `;
 
-    const result = await runOmniJs(script, normalizeDateParams(params));
+
+/**
+ * Edit a task or project in OmniFocus.
+ *
+ * The result is additive-only on purpose: `success`, `id`, `name`,
+ * `changedProperties` and `warnings` keep their existing meaning (move_task
+ * renders them), and `verified` / `mismatches` are new fields carrying the
+ * post-write read-back. `verified: false` means the edit was applied but at
+ * least one field did not read back as requested — callers should surface that
+ * rather than report a clean success.
+ */
+export async function editItem(params: EditItemParams): Promise<{
+  success: boolean,
+  id?: string,
+  name?: string,
+  changedProperties?: string,
+  warnings?: string[],
+  verified?: boolean,
+  mismatches?: EditItemMismatch[],
+  error?: string,
+  dryRun?: boolean,
+  changes?: Record<string, unknown>,
+  tagIds?: string[],
+  changedFields?: string[]
+}> {
+  try {
+    const validation = validateEditItemParams(params);
+    if (!validation.valid) {
+      return { success: false, error: validation.error };
+    }
+
+
+    const result = await runOmniJs(EDIT_ITEM_SCRIPT, normalizeDateParams(params), { readOnly: params.dryRun === true });
     const mismatches: EditItemMismatch[] = Array.isArray(result.mismatches) ? result.mismatches : [];
     return {
       success: result.success,
       id: result.id,
+      dryRun: result.dryRun,
+      changes: result.changes,
+      tagIds: result.tagIds,
+      changedFields: result.changedFields,
       name: result.name,
       changedProperties: result.changedProperties,
       warnings: result.warnings,

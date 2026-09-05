@@ -19,7 +19,7 @@ export async function getTasksByTag(options: GetTasksByTagOptions): Promise<stri
       tagName: tagName.trim(),
       hideCompleted: hideCompleted,
       exactMatch: exactMatch
-    });
+    }, { readOnly: true });
     
     
     // If result is an object, format it

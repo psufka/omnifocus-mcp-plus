@@ -49,10 +49,14 @@ Three more `Before`/`After` pairs cover metadata, with no convenience booleans:
 Rules that matter:
 
 - A bare `YYYY-MM-DD` is local midnight that day. Full ISO 8601 with an offset
-  is also accepted. Never pass a `…Z` string.
-- Week boundaries are **not** uniform: `dueThisWeek` / `deferThisWeek` /
-  `plannedThisWeek` run Sunday through Saturday; `completedThisWeek` runs from
-  the most recent Monday. `completedThisMonth` starts at the 1st.
+  or `Z` is also accepted. Machine output may use ISO instants; display them locally.
+- `weekStartsOn` controls every week predicate: `sunday` (default) or `monday`.
+  Completion weeks used Monday before 0.6; pass `monday` to retain that behavior.
+  `completedThisMonth` starts at the 1st.
+- `dateMode: "direct"` (default) uses dates set on the task itself.
+  `dateMode: "effective"` uses OmniFocus effective due/defer/planned dates, including
+  inheritance and parent restrictions. Completion and metadata dates do not inherit.
+- Project roots are excluded by default; `includeProjectRoots: true` opts in.
 - Completion filters only make sense with `taskStatus: ["Completed"]`.
 
 ## Output controls

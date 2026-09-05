@@ -2,17 +2,18 @@
 // Usage: node scripts/mcp-smoke.mjs <server.js path> <mode: read|mutate>
 //
 // read   — read-only calls against the live database; safe to run any time.
-// mutate — creates a handful of clearly-marked throwaway items, exercises the
-//          0.5.0 write paths (repetition, attachments, convert, reviews,
-//          perspective same-value rewrite, undo), and removes everything it
-//          created. Nothing pre-existing is touched.
+// mutate — creates disposable objects, verifies writes, then removes only its own
+//          objects in finally. Does not use global undo or rewrite existing perspectives.
 import { spawn, execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
-const serverPath = process.argv[2];
+const serverPath = resolve(process.argv[2] || 'dist/server.js');
+const expectedVersion = JSON.parse(readFileSync(join(dirname(serverPath), '..', 'package.json'), 'utf8')).version;
 const mode = process.argv[3] ?? 'read';
 
-const proc = spawn('node', [serverPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+const proc = spawn(process.execPath, [serverPath], { stdio: ['pipe', 'pipe', 'pipe'] });
 let stderrBuf = '';
 proc.stderr.on('data', (d) => (stderrBuf += d));
 
@@ -53,7 +54,7 @@ function firstText(result) {
 async function call(name, args) {
   const res = await rpc('tools/call', { name, arguments: args });
   if (res.error) return { protoError: res.error };
-  return { isError: res.result.isError === true, text: firstText(res.result) };
+  return { isError: res.result.isError === true, text: firstText(res.result), data: res.result.structuredContent?.data, meta: res.result.structuredContent?.meta };
 }
 
 const failures = [];
@@ -73,18 +74,19 @@ const init = await rpc('initialize', {
   capabilities: {},
   clientInfo: { name: 'smoke', version: '0' },
 });
-check('initialize', init.result?.serverInfo?.version === '0.5.0', `version=${init.result?.serverInfo?.version}`);
+check('initialize', init.result?.serverInfo?.version === expectedVersion, `version=${init.result?.serverInfo?.version}`);
 check('instructions present at handshake', typeof init.result?.instructions === 'string' && init.result.instructions.length > 50,
   `len=${init.result?.instructions?.length ?? 0}`);
 proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
 const list = await rpc('tools/list', {});
 const tools = list.result?.tools ?? [];
-check('tools/list count', tools.length === 50, `count=${tools.length}`);
+check('tools/list count', tools.length === 52, `count=${tools.length}`);
 const nonStrict = tools.filter((t) => t.inputSchema?.additionalProperties !== false);
 check('all schemas strict (additionalProperties:false)', nonStrict.length === 0,
   nonStrict.slice(0, 5).map((t) => t.name).join(','));
 const unannotated = tools.filter((t) => !t.annotations || t.annotations.readOnlyHint === undefined);
+check('all tools advertise output schemas', tools.every(t => t.outputSchema && t.outputSchema.properties?.success));
 check('all tools annotated', unannotated.length === 0, unannotated.slice(0, 5).map((t) => t.name).join(','));
 
 const prompts = await rpc('prompts/list', {});
@@ -95,9 +97,16 @@ check('resources/list has 4 resources', (resources.result?.resources ?? []).leng
   (resources.result?.resources ?? []).map((r) => r.uri).join(','));
 
 if (mode === 'read') {
+  const info = await call('server_info', {});
+  check('server diagnostics report build and live OmniFocus version', !info.isError && info.data.version === expectedVersion && /^[a-f0-9]{64}$/.test(info.data.buildId) && typeof info.data.omnifocus.version === 'string' && info.data.omnifocus.connected === true);
+  const tags = await call('list_tags', { sortBy: 'taskCount', limit: 5, fresh: true });
+  const tagCounts = tags.data?.tags?.map(t => t.availableTaskCount) || [];
+  check('tag counts are numeric and sorted', !tags.isError && tagCounts.every((n,i) => Number.isInteger(n) && (i === 0 || tagCounts[i-1] >= n)) && tagCounts.length > 0);
   const counts = await call('get_task_counts', {});
   check('get_task_counts', !counts.isError && !counts.protoError, counts.text || JSON.stringify(counts.protoError));
 
+  const allCount = await call('filter_tasks', { countOnly: true, taskStatus: ['Available','Next','Blocked','DueSoon','Overdue','Completed','Dropped'] });
+  check('filter total agrees with task counts', allCount.data?.count === counts.data?.total, `${allCount.data?.count} / ${counts.data?.total}`);
   const week = await call('filter_tasks', { completedThisWeek: true, limit: 5 });
   check('filter_tasks completedThisWeek', !week.isError && !week.protoError, week.text.slice(0, 200));
 
@@ -118,6 +127,7 @@ if (mode === 'read') {
   const fields = await call('filter_tasks', { limit: 3, fields: ['status'] });
   check('filter_tasks fields projection', !fields.isError && !fields.protoError, fields.text.slice(0, 120));
 
+  check('structured field projection hides unrequested notes and tags', fields.data?.tasks?.every(t => !('note' in t) && !('tags' in t) && t.id && t.name));
   const badClause = await call('filter_tasks', { and: [{ bogusKey: true }] });
   check('unsupported clause key rejects loudly', badClause.isError === true || badClause.protoError !== undefined,
     (badClause.text || JSON.stringify(badClause.protoError) || '').slice(0, 150));
@@ -128,7 +138,9 @@ if (mode === 'read') {
   const reviews = await call('manage_reviews', { operation: 'list_due', all: true });
   check('manage_reviews list_due', !reviews.isError && !reviews.protoError, reviews.text.slice(0, 150));
 
-  const health = await call('analyze', { analysis: 'health_snapshot' });
+  const health = await call('analyze', { analysis: 'health_snapshot', fresh: true });
+  const incomplete = await call('filter_tasks', { countOnly: true });
+  check('health and filter incomplete task counts agree', health.data?.incompleteTotal === incomplete.data?.count, `${health.data?.incompleteTotal} / ${incomplete.data?.count}`);
   check('analyze health_snapshot', !health.isError && !health.protoError, health.text.slice(0, 150));
 
   const stalled = await call('analyze', { analysis: 'stalled_projects' });
@@ -138,7 +150,8 @@ if (mode === 'read') {
   check('list_custom_perspectives includeRules', !persp.isError && !persp.protoError && /actionAvailability|rules/i.test(persp.text),
     persp.text.slice(0, 150));
 
-  const similar = await call('find_similar_tasks', { name: 'call the clinic' });
+  const similar = await call('find_similar_tasks', { name: 'call the clinic', limit: 3 });
+  check('structured similarity results are ranked and limited', Array.isArray(similar.data?.matches) && similar.data.matches.length <= 3 && similar.data.matches.every(m => typeof m.score === 'number') && !('tasks' in similar.data));
   check('find_similar_tasks', !similar.isError && !similar.protoError, similar.text.slice(0, 120));
 
   const focus = await call('app_control', { operation: 'get_focus' });
@@ -160,6 +173,10 @@ if (mode === 'read') {
   check('bad date rejected', badDate.isError === true || badDate.protoError !== undefined,
     (badDate.text || JSON.stringify(badDate.protoError) || '').slice(0, 150));
 
+  for (const date of ['2026-02-31','2026-02-29','1']) {
+    const invalid = await call('list_projects', { completedBefore: date });
+    check(`impossible or ambiguous date rejected: ${date}`, invalid.isError || invalid.protoError);
+  }
   const coerced = await call('filter_tasks', { countOnly: 'true', flagged: 'true' });
   check('stringified booleans coerce (tolerant input)', !coerced.isError && !coerced.protoError,
     coerced.text.slice(0, 120));
@@ -167,153 +184,97 @@ if (mode === 'read') {
 
 if (mode === 'mutate') {
   const stamp = Date.now();
-  const marker = `MCP smoke ${stamp} (safe to delete)`;
-  const cleanup = []; // {id, itemType}
+  const marker = `MCP reliability smoke ${stamp}`;
+  const owned = (name) => `${marker} ${name}`;
+  const must = (response, label) => {
+    check(label, !response.isError && !response.protoError, response.text || JSON.stringify(response.protoError));
+    if (response.isError || response.protoError) throw new Error(label);
+    return response.data;
+  };
+  try {
+    const dry = await call('batch_add_items', { dryRun: true, items: [{ itemType: 'task', name: owned('dry run') }] });
+    must(dry, 'batch creation preview');
+    check('preview creates nothing', omni(`return flattenedTasks.filter(t => t.name === ${JSON.stringify(owned('dry run'))}).length;`) === '0');
 
-  // --- dryRun creates nothing ---
-  const dryName = `${marker} dryrun`;
-  const dry = await call('batch_add_items', { dryRun: true, items: [{ itemType: 'task', name: dryName }] });
-  check('batch_add_items dryRun succeeds', !dry.isError && !dry.protoError, dry.text.slice(0, 150));
-  const dryGone = omni(`return flattenedTasks.filter(t => t.name === ${JSON.stringify(dryName)}).length === 0 ? 'nothing-created' : 'CREATED';`);
-  check('dryRun created nothing', dryGone === 'nothing-created', dryGone);
+    const folder = must(await call('create_folder', { name: owned('folder') }), 'create disposable folder');
+    const parentA = must(await call('create_tag', { name: owned('parent A') }), 'create tag parent A');
+    const parentB = must(await call('create_tag', { name: owned('parent B') }), 'create tag parent B');
+    const tagA = must(await call('create_tag', { name: owned('duplicate'), parent: parentA.id }), 'create tag leaf A');
+    const tagB = must(await call('create_tag', { name: owned('duplicate'), parent: parentB.id }), 'create tag leaf B');
+    const projectArgs = { name: owned('project'), folderName: folder.id, dueDate: '2030-02-28',
+      tags: [`${parentA.name}/${tagA.name}`], sequential: false, idempotencyKey: owned('project request') };
+    const project = must(await call('add_project', projectArgs), 'verified project creation by tag path');
+    check('project tag and placement verified', project.verified === true && project.tagIds.includes(tagA.id));
+    const replay = await call('add_project', projectArgs);
+    check('create request key replays the same project', !replay.isError && replay.data.projectId === project.projectId && replay.meta.idempotency.replayed === true);
+    const independentReplay = JSON.parse(execFileSync(process.execPath, [join(dirname(serverPath), 'cli.js'), 'call', 'add_project', JSON.stringify(projectArgs)], { encoding: 'utf8', timeout: 30_000 }));
+    check('request key replays across a separate CLI process', independentReplay.structuredContent.data.projectId === project.projectId && independentReplay.structuredContent.meta.idempotency.replayed === true);
 
-  // --- undo cycle FIRST: OmniFocus coalesces automation changes into undo
-  // groups, so this must run before any other smoke object exists — an undo
-  // later in the sequence swallows them all (observed live). ---
-  const undoName = `${marker} undome`;
-  await call('add_omnifocus_task', { name: undoName });
-  const undoTaskId = omni(`const t = flattenedTasks.filter(t => t.name === ${JSON.stringify(undoName)})[0]; return t ? t.id.primaryKey : 'NOT-FOUND';`);
-  check('undo target created', undoTaskId !== 'NOT-FOUND', `id=${undoTaskId}`);
-  const undo = await call('app_control', { operation: 'undo', confirm: true });
-  check('app_control undo with confirm', !undo.isError && !undo.protoError, undo.text.slice(0, 150));
-  const undone = omni(`return Task.byIdentifier(${JSON.stringify(undoTaskId)}) === null ? 'gone' : 'still-there';`);
-  check('undo removed the just-created task', undone === 'gone', undone);
-  if (undone !== 'gone') cleanup.push({ id: undoTaskId, itemType: 'task' });
+    const task = must(await call('add_omnifocus_task', { name: owned('task'), projectName: projectArgs.name, tagIds: [tagA.id], note: 'Disposable reliability smoke item.' }), 'verified task creation by tag ID');
+    const inherited = await call('filter_tasks', { projectFilter: projectArgs.name, dueBefore: '2030-03-01', dateMode: 'effective', countOnly: true });
+    const direct = await call('filter_tasks', { projectFilter: projectArgs.name, dueBefore: '2030-03-01', dateMode: 'direct', countOnly: true });
+    check('inherited dates are explicit and project roots excluded', inherited.data.count === 1 && direct.data.count === 0);
 
-  // --- verified create ---
-  const add = await call('add_omnifocus_task', { name: marker, note: 'Created by smoke test; will be removed.' });
-  check('add_omnifocus_task verified create', !add.isError && !add.protoError && !/verified.*false/i.test(add.text),
-    add.text.slice(0, 150));
-  const taskId = omni(`const t = flattenedTasks.filter(t => t.name === ${JSON.stringify(marker)})[0]; return t ? t.id.primaryKey : 'NOT-FOUND';`);
-  check('task exists in OmniFocus', taskId !== 'NOT-FOUND' && !taskId.startsWith('ERR'), `id=${taskId}`);
-  cleanup.push({ id: taskId, itemType: 'task' });
+    const ambiguousCreate = await call('add_omnifocus_task', { name: owned('must not exist'), tags: [tagA.name] });
+    check('ambiguous creation rejected before mutation', ambiguousCreate.isError && /Ambiguous/.test(ambiguousCreate.text));
+    const ambiguousEdit = await call('edit_item', { id: task.taskId, itemType: 'task', newName: owned('wrong rename'), replaceTags: [tagA.name] });
+    check('ambiguous replacement rejected before rename or clear', ambiguousEdit.isError && /Ambiguous/.test(ambiguousEdit.text));
+    const unchanged = must(await call('get_task_by_id', { taskId: task.taskId }), 'read after rejected edit');
+    check('failed tag preflight left the item intact', unchanged.task.name === owned('task') && unchanged.task.tags.some(t => (typeof t === 'string' ? t : t.name) === tagA.name));
 
-  // --- find_similar sees it ---
-  const sim = await call('find_similar_tasks', { name: `MCP smoke ${stamp} safe to delete` });
-  check('find_similar_tasks finds the throwaway', !sim.isError && sim.text.includes(taskId), sim.text.slice(0, 200));
+    const edits = { items: [{ id: task.taskId, itemType: 'task', newDueDate: '2030-02-27', newPlannedDate: '2030-02-26', replaceTagIds: [tagB.id] }] };
+    const preview = must(await call('batch_edit_items', { ...edits, dryRun: true }), 'batch edit preview');
+    check('batch edit preview returns target ID and changes', preview.results[0].id === task.taskId && preview.results[0].status === 'wouldEdit');
+    const beforeEdit = must(await call('get_task_by_id', { taskId: task.taskId }), 'read after preview');
+    check('batch edit preview did not set due date', !beforeEdit.task.dueDate);
+    const edited = must(await call('batch_edit_items', edits), 'batch edit applies and verifies');
+    check('batch edit verifies exact tag ID', edited.results[0].verified === true && edited.results[0].tagIds.includes(tagB.id));
 
-  // --- structured repetition ---
-  const rep = await call('set_task_repetition', {
-    task_id: taskId, frequency: 'daily', interval: 2, schedule_type: 'from_completion',
-  });
-  check('set_task_repetition structured (every 2 days, from completion)', !rep.isError && !rep.protoError,
-    rep.text.slice(0, 200));
-  const method = omni(`const t = Task.byIdentifier(${JSON.stringify(taskId)}); if (!t) return 'NOT-FOUND'; if (!t.repetitionRule) return 'NO-RULE'; const r = t.repetitionRule; return JSON.stringify({ isDueDate: r.method === Task.RepetitionMethod.DueDate, rule: r.ruleString });`);
-  let methodOk = false;
-  try { const m = JSON.parse(method); methodOk = m.isDueDate === true && /FREQ=DAILY/.test(m.rule) && /INTERVAL=2/.test(m.rule); } catch {}
-  check('repetition rule verified live (DueDate + FREQ=DAILY;INTERVAL=2)', methodOk, method);
+    const batch = must(await call('batch_add_items', { atomic: true, items: [
+      { itemType: 'task', name: owned('parent task'), projectName: projectArgs.name, tempId: 'parent' },
+      { itemType: 'task', name: owned('child task'), parentTempId: 'parent', tagIds: [tagB.id] }
+    ] }), 'atomic hierarchy creation');
+    check('batch hierarchy read-back verified', batch.verified === true && batch.results.every(r => r.id && r.verified));
+    const rollback = await call('batch_add_items', { atomic: true, items: [
+      { itemType: 'task', name: owned('rolled back') },
+      { itemType: 'task', name: owned('invalid destination'), projectName: owned('nonexistent project') }
+    ] });
+    check('failed atomic batch verifies complete rollback', rollback.isError && rollback.data.rolledBack === true && rollback.data.rollbackStatus === 'complete' && rollback.data.survivingItems.length === 0);
 
-  // --- attachment cycle (also verifies FileWrapper field shape live) ---
-  const attAdd = await call('manage_attachments', {
-    operation: 'add', taskId, filename: 'smoke.txt', base64: Buffer.from(`hello from smoke ${stamp}`).toString('base64'),
-  });
-  check('manage_attachments add', !attAdd.isError && !attAdd.protoError, attAdd.text.slice(0, 180));
-  const attList = await call('manage_attachments', { operation: 'list', taskId });
-  check('manage_attachments list shows 1', !attList.isError && /smoke\.txt|1/.test(attList.text), attList.text.slice(0, 180));
-  const attRead = await call('manage_attachments', { operation: 'read', taskId, index: 0 });
-  const wantB64 = Buffer.from(`hello from smoke ${stamp}`).toString('base64');
-  check('manage_attachments read round-trips content', !attRead.isError && attRead.text.includes(wantB64),
-    attRead.text.slice(0, 180));
-  const attRm = await call('manage_attachments', { operation: 'remove', taskId, index: 0 });
-  check('manage_attachments remove', !attRm.isError && !attRm.protoError, attRm.text.slice(0, 150));
-  const attCount = omni(`const t = Task.byIdentifier(${JSON.stringify(taskId)}); return t ? String(t.attachments.length) : 'NOT-FOUND';`);
-  check('attachments empty after remove', attCount === '0', attCount);
-
-  // --- stale-ID guard still holds ---
-  const staleId = await call('remove_item', { id: 'zzz-nonexistent-id-zzz', name: marker, itemType: 'task' });
-  check('stale ID does NOT fall back to name', staleId.isError === true && /not found with ID/i.test(staleId.text),
-    staleId.text.slice(0, 200));
-
-  // --- convert task -> project (second throwaway) ---
-  const convName = `${marker} convertme`;
-  await call('add_omnifocus_task', { name: convName, note: 'smoke conversion target' });
-  const convTaskId = omni(`const t = flattenedTasks.filter(t => t.name === ${JSON.stringify(convName)})[0]; return t ? t.id.primaryKey : 'NOT-FOUND';`);
-  const conv = await call('convert_task_to_project', { taskId: convTaskId });
-  check('convert_task_to_project', !conv.isError && !conv.protoError, conv.text.slice(0, 200));
-  const convProjId = omni(`const p = flattenedProjects.filter(p => p.name === ${JSON.stringify(convName)})[0]; return p ? p.id.primaryKey : 'NOT-FOUND';`);
-  check('converted project exists', convProjId !== 'NOT-FOUND' && !convProjId.startsWith('ERR'), `id=${convProjId}`);
-  if (convProjId !== 'NOT-FOUND' && !convProjId.startsWith('ERR')) cleanup.push({ id: convProjId, itemType: 'project' });
-  else if (convTaskId !== 'NOT-FOUND') cleanup.push({ id: convTaskId, itemType: 'task' });
-
-  // --- review cycle (third throwaway: a project) ---
-  const revName = `${marker} reviewproj`;
-  await call('add_project', { name: revName });
-  const revProjId = omni(`const p = flattenedProjects.filter(p => p.name === ${JSON.stringify(revName)})[0]; return p ? p.id.primaryKey : 'NOT-FOUND';`);
-  check('review project created', revProjId !== 'NOT-FOUND' && !revProjId.startsWith('ERR'), `id=${revProjId}`);
-  cleanup.push({ id: revProjId, itemType: 'project' });
-  const sched = await call('manage_reviews', { operation: 'set_schedule', projectId: revProjId, unit: 'week', steps: 2 });
-  check('manage_reviews set_schedule', !sched.isError && !sched.protoError, sched.text.slice(0, 180));
-  const marked = await call('manage_reviews', { operation: 'mark_reviewed', projectId: revProjId });
-  check('manage_reviews mark_reviewed verified', !marked.isError && !/verified.*false/i.test(marked.text),
-    marked.text.slice(0, 200));
-  const revDates = omni(`const p = Project.byIdentifier(${JSON.stringify(revProjId)}); if (!p) return 'NOT-FOUND'; const days = Math.round((p.nextReviewDate - p.lastReviewDate) / 86400000); return JSON.stringify({ days, unit: p.reviewInterval.unit, steps: p.reviewInterval.steps });`);
-  let revOk = false;
-  // 13 or 14: mark_reviewed may normalize the next date to local midnight,
-  // which shaves partial-day hours off the raw day diff.
-  try { const r = JSON.parse(revDates); revOk = (r.days === 14 || r.days === 13) && r.unit === 'weeks' && r.steps === 2; } catch {}
-  check('review dates verified live (next = last + 2 weeks, interval 2 weeks)', revOk, revDates);
-
-  // --- perspective same-value rewrite (zero net change) ---
-  const perspName = omni(`const c = Perspective.Custom.all; return c.length > 0 ? c[0].name : 'NONE';`);
-  if (perspName !== 'NONE' && !perspName.startsWith('ERR')) {
-    const before = omni(`const p = Perspective.Custom.byName(${JSON.stringify(perspName)}); return JSON.stringify(p.archivedFilterRules);`);
-    const rules = JSON.parse(before);
-    const rewrite = await call('update_perspective_rules', { perspectiveName: perspName, rules });
-    check('update_perspective_rules same-value rewrite verified', !rewrite.isError && /verified|✅|success/i.test(rewrite.text),
-      rewrite.text.slice(0, 200));
-    const after = omni(`const p = Perspective.Custom.byName(${JSON.stringify(perspName)}); return JSON.stringify(p.archivedFilterRules);`);
-    check('perspective rules byte-identical after rewrite', JSON.stringify(JSON.parse(after)) === JSON.stringify(rules),
-      `before=${before.slice(0, 80)} after=${after.slice(0, 80)}`);
-  } else {
-    console.log('INFO: no custom perspectives — rewrite check skipped');
-  }
-
-  // --- focus cycle (only from a clean empty-focus state) ---
-  const focusBefore = omni(`return document.windows.length === 0 ? 'NO-WINDOW' : String(document.windows[0].focus.length);`);
-  if (focusBefore === '0') {
-    const folderName = omni(`return flattenedFolders.length > 0 ? flattenedFolders[0].name : 'NONE';`);
-    if (folderName !== 'NONE') {
-      const setF = await call('app_control', { operation: 'set_focus', folderNames: [folderName] });
-      check('app_control set_focus', !setF.isError && !setF.protoError, setF.text.slice(0, 150));
-      const getF = await call('app_control', { operation: 'get_focus' });
-      check('get_focus shows the folder', getF.text.includes(folderName), getF.text.slice(0, 150));
-      const clearF = await call('app_control', { operation: 'clear_focus' });
-      check('app_control clear_focus restores empty focus', !clearF.isError &&
-        omni(`return String(document.windows[0].focus.length);`) === '0', clearF.text.slice(0, 120));
+    must(await call('set_task_repetition', { task_id: task.taskId, frequency: 'daily', interval: 2, schedule_type: 'from_completion' }), 'set repetition on disposable task');
+    const content = Buffer.from(`smoke ${stamp}`).toString('base64');
+    must(await call('manage_attachments', { operation: 'add', taskId: task.taskId, filename: 'smoke.txt', base64: content }), 'add disposable attachment');
+    const attachment = must(await call('manage_attachments', { operation: 'read', taskId: task.taskId, index: 0 }), 'read disposable attachment');
+    check('structured attachment round-trips bytes', attachment.base64 === content);
+    must(await call('manage_attachments', { operation: 'remove', taskId: task.taskId, index: 0 }), 'remove disposable attachment');
+    must(await call('manage_reviews', { operation: 'set_schedule', projectId: project.projectId, unit: 'week', steps: 2 }), 'set disposable project review');
+    must(await call('manage_reviews', { operation: 'mark_reviewed', projectId: project.projectId }), 'mark disposable project reviewed');
+    const toConvert = must(await call('add_omnifocus_task', { name: owned('convert') }), 'create disposable conversion task');
+    must(await call('convert_task_to_project', { taskId: toConvert.taskId }), 'convert disposable task');
+  } catch (error) {
+    check('mutation workflow finished', false, error.message);
+  } finally {
+    // Locate only this run's uniquely prefixed objects, including creates whose
+    // transport response was lost. Cleanup uses IDs, never a fuzzy name match.
+    const leftovers = JSON.parse(omni(`const prefix = ${JSON.stringify(marker)}; const matches = x => x.name.indexOf(prefix) === 0;
+      return JSON.stringify({tasks: flattenedTasks.filter(t => !t.project && matches(t)).map(t => t.id.primaryKey),
+        projects: flattenedProjects.filter(matches).map(p => p.id.primaryKey), tags: flattenedTags.filter(matches).map(t => t.id.primaryKey).reverse(),
+        folders: flattenedFolders.filter(matches).map(f => f.id.primaryKey).reverse()});`));
+    for (const [kind, ids] of Object.entries(leftovers)) {
+      for (const id of ids) {
+        try {
+          const cls = { tasks: 'Task', projects: 'Project', tags: 'Tag', folders: 'Folder' }[kind];
+          if (omni(`return ${cls}.byIdentifier(${JSON.stringify(id)}) === null ? 'gone' : 'exists';`) === 'gone') continue;
+          const result = kind === 'tags' ? await call('delete_tag', { name_or_id: id })
+            : kind === 'folders' ? await call('delete_folder', { name_or_id: id })
+            : await call('remove_item', { id, itemType: kind === 'tasks' ? 'task' : 'project' });
+          check(`cleanup ${kind} ${id}`, !result.isError && !result.protoError, result.text);
+        } catch (error) { check(`cleanup ${kind} ${id}`, false, error.message); }
+      }
     }
-  } else {
-    console.log(`INFO: focus not empty or no window (${focusBefore}) — focus cycle skipped to avoid disturbing state`);
+    const remaining = omni(`const prefix = ${JSON.stringify(marker)}; return String([flattenedTasks,flattenedProjects,flattenedTags,flattenedFolders].reduce((n, xs) => n + xs.filter(x => x.name.indexOf(prefix) === 0).length,0));`);
+    check('zero disposable leftovers', remaining === '0', `leftovers=${remaining}`);
   }
-
-  // --- cleanup everything we created (tolerate objects a coalesced undo or
-  // background sync already removed) ---
-  for (const item of cleanup) {
-    if (!item.id || item.id === 'NOT-FOUND' || item.id.startsWith('ERR')) continue;
-    const cls = item.itemType === 'project' ? 'Project' : 'Task';
-    const exists = omni(`return ${cls}.byIdentifier(${JSON.stringify(item.id)}) !== null ? 'yes' : 'no';`);
-    if (exists !== 'yes') {
-      console.log(`INFO: ${item.itemType} ${item.id} already gone — cleanup skipped`);
-      continue;
-    }
-    const rm = await call('remove_item', { id: item.id, itemType: item.itemType });
-    check(`cleanup ${item.itemType} ${item.id}`, !rm.isError && !rm.protoError, rm.text.slice(0, 100));
-  }
-  const leftovers = omni(`return String(flattenedTasks.filter(t => t.name.indexOf('MCP smoke ${stamp}') === 0).length + flattenedProjects.filter(p => p.name.indexOf('MCP smoke ${stamp}') === 0).length);`);
-  check('zero smoke leftovers in database', leftovers === '0', `leftovers=${leftovers}`);
-
-  // --- sync once at the end, per our own guidance ---
-  const sync = await call('app_control', { operation: 'sync' });
-  check('app_control sync', !sync.isError && !sync.protoError, sync.text.slice(0, 100));
 }
 
 check('no stdout pollution', nonJsonLines === 0, `${nonJsonLines} non-JSON lines`);

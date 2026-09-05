@@ -2,6 +2,7 @@ import { runOmniJs } from '../../utils/scriptExecution.js';
 import { OMNIJS_LOOKUP_HELPERS } from '../../utils/omniJsHelpers.js';
 import {
   OMNIJS_CREATE_TASK_HELPER,
+  OMNIJS_CREATE_PROJECT_HELPER,
   OMNIJS_PLACEMENT_HELPERS,
   normalizeItemDates,
   validateAddTaskParams
@@ -25,6 +26,7 @@ export type BatchAddItemsParams = {
   flagged?: boolean;
   estimatedMinutes?: number;
   tags?: string[];
+  tagIds?: string[];
   projectName?: string; // For tasks
   parentTaskId?: string; // For subtasks
   parentTaskName?: string; // For subtasks (alternative to ID)
@@ -58,42 +60,13 @@ type BatchResult = {
   mapping?: Record<string, string>;
   /** true when an atomic batch failed and every created object was deleted. */
   rolledBack?: boolean;
+  rollbackStatus?: 'not_needed' | 'complete' | 'partial';
+  survivingItems?: Array<{ id?: string; name: string; itemType: string; index: number }>;
   /** Every created object was read back and confirmed in the requested container. */
   verified?: boolean;
   /** Objects the rollback could not delete (already gone, or deletion threw). */
   rollbackErrors?: string[];
 };
-
-/**
- * OmniJS source for `__createProject(spec, warnings, created, presetPlacement)`.
- * Mirrors the addProject primitive; kept here (rather than imported from it)
- * because batch_add_items must create projects inside the same single script as
- * its tasks. Requires OMNIJS_PLACEMENT_HELPERS and OMNIJS_CREATE_TASK_HELPER.
- */
-const OMNIJS_CREATE_PROJECT_HELPER = `
-  function __createProject(spec, warnings, created, presetPlacement) {
-    var placement = presetPlacement;
-    if (!placement) {
-      var resolved = __resolveProjectPlacement(spec);
-      if (resolved.error) { return { error: resolved.error }; }
-      placement = resolved.placement;
-    }
-
-    var project = new Project(spec.name, placement.location);
-    if (created) { created.push({ obj: project, kind: 'project', name: spec.name }); }
-
-    if (spec.note !== undefined) { project.note = spec.note; }
-    if (spec.dueDate) { project.dueDate = new Date(spec.dueDate); }
-    if (spec.deferDate) { project.deferDate = new Date(spec.deferDate); }
-    if (spec.plannedDate) { __setPlannedDate(project, spec.plannedDate, warnings); }
-    if (spec.flagged !== undefined) { project.flagged = spec.flagged; }
-    if (spec.estimatedMinutes !== undefined) { project.estimatedMinutes = spec.estimatedMinutes; }
-    if (spec.sequential !== undefined) { project.sequential = spec.sequential; }
-    if (spec.tags && spec.tags.length > 0) { __applyTagsTo(project, spec.tags, created); }
-
-    return { project: project, placement: placement };
-  }
-`;
 
 type PreparedItem = BatchAddItemsParams & { kind?: string; preflightError?: string };
 
@@ -160,15 +133,16 @@ export const BATCH_ADD_ITEMS_SCRIPT = `
 
     const results = [];
     const created = [];        // creation order; rollback walks it in reverse
-    const tempMap = {};        // tempId -> { id, kind, name, obj }
-    const plannedTempMap = {}; // dryRun equivalent: tempId -> { name, kind }
-    const mapping = {};        // tempId -> real id
+    const tempMap = Object.create(null);        // tempId -> { id, kind, name, obj }
+    const plannedTempMap = Object.create(null); // dryRun equivalent: tempId -> { name, kind }
+    const mapping = Object.create(null);        // tempId -> real id
     const rollbackErrors = [];
     let anyFailed = false;
 
     for (let i = 0; i < args.items.length; i++) {
       const item = args.items[i];
       const warnings = [];
+      const creationStart = created.length;
       try {
         if (anyFailed && stopOnError) {
           results.push({
@@ -225,7 +199,8 @@ export const BATCH_ADD_ITEMS_SCRIPT = `
         if (dryRun) {
           // Tag resolution is a pure read here; the real path resolves the same
           // names inside __applyTagsTo, creating the missing ones.
-          const tagPlan = __resolveTagsSpec(item.tags);
+          const tagPlan = __resolveTagsSpec(item.tags, item.tagIds);
+          if (tagPlan.error) throw new Error(tagPlan.error);
           if (item.tempId) { plannedTempMap[item.tempId] = { name: item.name, kind: item.kind }; }
           results.push({
             index: i,
@@ -261,6 +236,11 @@ export const BATCH_ADD_ITEMS_SCRIPT = `
         const check = item.kind === 'task'
           ? __verifyTaskPlacement(madeObject, placement)
           : __verifyProjectPlacement(madeObject, placement);
+
+        if (!__verifyTagPlan(madeObject, outcome.tagPlan)) {
+          check.verified = false;
+          check.warning = 'Tag verification failed: requested tag IDs were not retained.';
+        }
 
         if (!check.exists) {
           anyFailed = true;
@@ -315,38 +295,58 @@ export const BATCH_ADD_ITEMS_SCRIPT = `
           tempId: item.tempId,
           error: (e && e.message) ? e.message : 'Unknown error creating item'
         });
+      } finally {
+        for (var c = creationStart; c < created.length; c++) created[c].index = i;
       }
     }
 
     // --- 4. ROLLBACK (same script: a second round-trip would race sync) ---
     let rolledBack = false;
+    let rollbackStatus = 'not_needed';
+    const survivingItems = [];
     if (!dryRun && atomic && anyFailed && created.length > 0) {
+      const attempts = [];
       for (let r = created.length - 1; r >= 0; r--) {
-        try {
-          deleteObject(created[r].obj);
-        } catch (e) {
-          rollbackErrors.push(created[r].kind + ' "' + created[r].name + '": ' + ((e && e.message) ? e.message : 'could not be deleted'));
-        }
+        const entry = created[r];
+        let id = null, failure = null;
+        try { id = entry.obj.id.primaryKey; } catch (e) {}
+        try { deleteObject(entry.obj); } catch (e) { failure = e.message || String(e); }
+        attempts.push({ entry: entry, id: id, failure: failure });
       }
-      rolledBack = true;
-
+      attempts.forEach(function (attempt) {
+        const entry = attempt.entry;
+        const collection = entry.kind === 'task' ? flattenedTasks : entry.kind === 'project' ? flattenedProjects : flattenedTags;
+        const remains = !attempt.id || __findById(collection, attempt.id, entry.kind);
+        if (remains) {
+          survivingItems.push({ id: attempt.id, name: entry.name, itemType: entry.kind, index: entry.index });
+          rollbackErrors.push(entry.kind + ' "' + entry.name + '" (' + (attempt.id || 'unknown id') + '): ' + (attempt.failure || 'still exists after deletion'));
+        }
+      });
+      rolledBack = survivingItems.length === 0;
+      rollbackStatus = rolledBack ? 'complete' : 'partial';
       for (let k = 0; k < results.length; k++) {
-        if (results[k].success === true) {
+        const survivors = survivingItems.filter(function (entry) { return entry.index === k; });
+        const wasCreated = created.some(function (entry) { return entry.index === k; });
+        if (wasCreated && (survivors.length > 0 || results[k].success)) {
           results[k].success = false;
-          results[k].status = 'rolledBack';
-          results[k].verified = undefined;
-          results[k].error = 'Rolled back: another item in this atomic batch failed.';
+          results[k].status = survivors.length ? 'rollbackFailed' : 'rolledBack';
+          results[k].verified = false;
+          results[k].error = survivors.length
+            ? 'Rollback incomplete; surviving IDs: ' + survivors.map(function (entry) { return entry.id || '(unknown)'; }).join(', ')
+            : 'Rolled back: another item in this atomic batch failed.';
         }
       }
-
-      const tempKeys = Object.getOwnPropertyNames(mapping);
-      for (let m = 0; m < tempKeys.length; m++) { delete mapping[tempKeys[m]]; }
+      Object.getOwnPropertyNames(mapping).forEach(function (key) {
+        if (!survivingItems.some(function (entry) { return entry.id === mapping[key]; })) delete mapping[key];
+      });
     }
 
     return JSON.stringify({
       success: true,
       dryRun: dryRun,
       rolledBack: rolledBack,
+      rollbackStatus: rollbackStatus,
+      survivingItems: survivingItems,
       mapping: mapping,
       rollbackErrors: rollbackErrors,
       results: results
@@ -397,6 +397,8 @@ export async function batchAddItems(items: BatchAddItemsParams[], options?: Batc
       dryRun,
       mapping: raw && raw.mapping && typeof raw.mapping === 'object' ? raw.mapping : {},
       rolledBack: raw && raw.rolledBack === true,
+      rollbackStatus: raw?.rollbackStatus ?? 'not_needed',
+      survivingItems: Array.isArray(raw?.survivingItems) ? raw.survivingItems : [],
       verified: dryRun ? undefined : allVerified(results),
       rollbackErrors
     };

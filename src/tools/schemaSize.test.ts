@@ -17,14 +17,10 @@ import { buildServer } from '../server.js';
  * metadata.
  */
 
-// FINAL 0.5.0 budget, measured 2026-08-10 against the complete 50-tool
-// surface (after description trims): total ≈ 67.2KB, largest single tool
-// filter_tasks ≈ 8.6KB (trimmed from 11.2KB — its clause schema serializes
-// 3x, so its descriptions stay terse; deep docs live in
-// docs/skills/omnifocus/filters.md).
-// The cap is measured + ~6% headroom, NOT a growth allowance: adding a tool
-// or fattening a description should trip this and force a conscious trade.
-const TOTAL_BYTES_CAP = 71_000;
+// 0.6.0: 52 tools, about 94.5 KB including output schemas on every tool,
+// batch editing, diagnostics, freshness and request keys. The added schemas are
+// an intentional API expansion; retain a tight cap and the unchanged per-tool cap.
+const TOTAL_BYTES_CAP = 96_000;
 
 // A single tool this large is a design problem, not a budget problem: it means
 // an enum or a description block that should have moved into docs.

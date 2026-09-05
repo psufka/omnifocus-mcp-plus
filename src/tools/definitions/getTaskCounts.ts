@@ -8,6 +8,8 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 // Overdue) — not just Task.Status.Available — and `dueSoon` comes from
 // Task.Status.DueSoon, so it follows the user's OmniFocus "due soon" setting.
 export const schema = z.object({
+  includeProjectRoots: z.boolean().optional().describe('Include project root tasks (default false).'),
+  dateMode: z.enum(['direct', 'effective']).optional().describe('Date predicates use dates set directly on tasks, or effective dates inherited from parents/projects. Default: direct.'),
   project: z.string().optional().describe("Filter to tasks in this project (name match)"),
   tag: z.string().optional().describe("Filter to tasks with this tag (name match)"),
   flagged: z.boolean().optional().describe("Filter to flagged (true) or unflagged (false) tasks"),

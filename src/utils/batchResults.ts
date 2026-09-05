@@ -22,7 +22,7 @@
  *   rolledBack — the item was created, then deleted again because the atomic
  *                batch failed later on
  */
-export type BatchItemStatus = 'ok' | 'planned' | 'failed' | 'skipped' | 'rolledBack';
+export type BatchItemStatus = 'ok' | 'planned' | 'failed' | 'skipped' | 'rolledBack' | 'rollbackFailed';
 
 /**
  * Where an item is (or would be). `kind` is the container class, never the
@@ -75,6 +75,9 @@ export type BatchItemResult = {
     from?: BatchPlacement;
     to?: BatchPlacement;
   };
+  wouldEdit?: { id: string; name: string; changes: Record<string, unknown> };
+  mismatches?: Array<{ field: string; expected: unknown; actual: unknown; kind?: 'date' }>;
+  changedProperties?: string;
 };
 
 /**
@@ -116,12 +119,15 @@ export function coerceBatchResults(raw: any, itemCount: number, fallbackError: s
       wouldCreate: entry.wouldCreate || undefined,
       wouldRemove: entry.wouldRemove || undefined,
       wouldMove: entry.wouldMove || undefined,
+      wouldEdit: entry.wouldEdit || undefined,
+      mismatches: entry.mismatches || undefined,
+      changedProperties: entry.changedProperties || undefined,
     });
   }
   return results;
 }
 
-const STATUSES: BatchItemStatus[] = ['ok', 'planned', 'failed', 'skipped', 'rolledBack'];
+const STATUSES: BatchItemStatus[] = ['ok', 'planned', 'failed', 'skipped', 'rolledBack', 'rollbackFailed'];
 
 function isStatus(value: any): value is BatchItemStatus {
   return typeof value === 'string' && (STATUSES as string[]).indexOf(value) !== -1;

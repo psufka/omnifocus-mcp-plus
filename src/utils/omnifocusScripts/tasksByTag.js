@@ -1,5 +1,6 @@
 // OmniJS script to get tasks by tag from OmniFocus
 (() => {
+  /* @task-query-helpers */
   try {
     // Parameters will be injected by the script execution system
     const args = typeof injectedArgs !== 'undefined' && injectedArgs ? injectedArgs : {};
@@ -78,7 +79,7 @@
     const seenTaskIds = new Set();
 
     matchingTags.forEach(tag => {
-      const tasksWithTag = tag.tasks;
+      const tasksWithTag = tag.tasks.filter(__isRealTask);
       console.log(`Tag "${tag.name}" has ${tasksWithTag.length} tasks`);
 
       tasksWithTag.forEach(task => {
