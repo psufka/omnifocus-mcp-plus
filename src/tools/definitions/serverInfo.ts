@@ -14,7 +14,8 @@ export const DIAGNOSTIC_SCRIPT = `
     build: app.buildVersion ? app.buildVersion.versionString : null,
     capabilities: { plannedDates: supports('plannedDate'), effectivePlannedDates: supports('effectivePlannedDate'),
       attachments: supports('attachments'), taskLookupById: typeof Task.byIdentifier === 'function',
-      projectLookupById: typeof Project.byIdentifier === 'function' } });
+      projectLookupById: typeof Project.byIdentifier === 'function',
+      automationApiLookup: typeof app.getTypeScriptDeclarations === 'function' } });
 `;
 export async function handler(args: z.infer<typeof schema>) {
   let omnifocus: any = { connected: null, probed: false };

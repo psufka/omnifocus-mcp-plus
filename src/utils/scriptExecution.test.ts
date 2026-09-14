@@ -186,6 +186,11 @@ function writeFakeOsascript(dir: string, body: string): string {
 }
 
 async function withEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
+  // Fake processes must not compete for the real user's OmniFocus slots. That
+  // made the two-process concurrency assertion fail during live smoke testing.
+  if (vars.OMNIFOCUS_OSASCRIPT_BIN && vars.OMNIFOCUS_MCP_STATE_DIR === undefined) {
+    vars = { ...vars, OMNIFOCUS_MCP_STATE_DIR: join(dirname(vars.OMNIFOCUS_OSASCRIPT_BIN), 'coordinator-state') };
+  }
   const saved = new Map<string, string | undefined>();
   for (const [key, value] of Object.entries(vars)) {
     saved.set(key, process.env[key]);

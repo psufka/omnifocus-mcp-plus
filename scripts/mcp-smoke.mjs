@@ -102,7 +102,7 @@ proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initial
 
 const list = await rpc('tools/list', {});
 const tools = list.result?.tools ?? [];
-check('tools/list count', tools.length === 52, `count=${tools.length}`);
+check('tools/list count', tools.length === 53, `count=${tools.length}`);
 const nonStrict = tools.filter((t) => t.inputSchema?.additionalProperties !== false);
 check('all schemas strict (additionalProperties:false)', nonStrict.length === 0,
   nonStrict.slice(0, 5).map((t) => t.name).join(','));
@@ -120,6 +120,28 @@ check('resources/list has 4 resources', (resources.result?.resources ?? []).leng
 if (mode === 'read') {
   const info = await call('server_info', {});
   check('server diagnostics report build and live OmniFocus version', !info.isError && info.data.version === expectedVersion && /^[a-f0-9]{64}$/.test(info.data.buildId) && typeof info.data.omnifocus.version === 'string' && info.data.omnifocus.connected === true);
+  const apiSupported = info.data?.omnifocus?.capabilities?.automationApiLookup;
+  check('diagnostics disclose API lookup capability', typeof apiSupported === 'boolean');
+  const apiTool = tools.find(t => t.name === 'search_automation_api');
+  check('API lookup is advertised read-only', apiTool?.annotations?.readOnlyHint === true);
+  const api = await call('search_automation_api', { query: 'getTypeScriptDeclarations', refresh: true });
+  if (apiSupported) {
+    check('API lookup returns installed-version documentation', !api.isError && api.data.supported === true && api.data.version === info.data.omnifocus.version && api.data.build === info.data.omnifocus.build && api.data.declarations.includes('getTypeScriptDeclarations'));
+    const cachedApi = await call('search_automation_api', { query: 'getTypeScriptDeclarations' });
+    check('API documentation cache returns identical text with version check', !cachedApi.isError && cachedApi.data.cache.hit === true && cachedApi.data.cache.versionChecked === true && cachedApi.data.declarations === api.data.declarations);
+    const refreshApi = await call('search_automation_api', { query: 'getTypeScriptDeclarations', refresh: true });
+    check('API refresh bypasses documentation cache', !refreshApi.isError && refreshApi.data.cache.hit === false);
+    const page1 = await call('search_automation_api', { query: 'Task', maxCharacters: 256 });
+    const page2 = await call('search_automation_api', { query: 'Task', maxCharacters: 256, offset: page1.data.nextOffset });
+    const actualDocs = omni(`return app.getTypeScriptDeclarations('Task');`);
+    check('API pages match the native documentation', !page1.isError && !page2.isError && page1.data.truncated === true && page1.data.declarations.length <= 256 && page2.data.declarations.length <= 256 && page1.data.declarations + page2.data.declarations === actualDocs.slice(0, page1.data.declarations.length + page2.data.declarations.length));
+    const noMatch = await call('search_automation_api', { query: 'NoSuchOmniApi_5a9f81e3' });
+    check('API no-match query is an empty success', !noMatch.isError && noMatch.data.totalCharacters === 0 && noMatch.data.declarations === '');
+  } else {
+    check('older OmniFocus reports API lookup unavailable without breaking other tools', api.isError && api.data.supported === false && /4\.9/.test(api.data.error));
+  }
+  const invalidApi = await call('search_automation_api', { query: 'Task', maxCharacters: 40_001 });
+  check('API output limit cannot be bypassed', invalidApi.isError || invalidApi.protoError);
   const tags = await call('list_tags', { sortBy: 'taskCount', limit: 5, fresh: true });
   const tagCounts = tags.data?.tags?.map(t => t.availableTaskCount) || [];
   check('tag counts are numeric and sorted', !tags.isError && tagCounts.every((n,i) => Number.isInteger(n) && (i === 0 || tagCounts[i-1] >= n)) && tagCounts.length > 0);
@@ -148,7 +170,8 @@ if (mode === 'read') {
   const fields = await call('filter_tasks', { limit: 3, fields: ['status'] });
   check('filter_tasks fields projection', !fields.isError && !fields.protoError, fields.text.slice(0, 120));
 
-  check('structured field projection hides unrequested notes and tags', fields.data?.tasks?.every(t => !('note' in t) && !('tags' in t) && t.id && t.name));
+  // OmniFocus permits untitled tasks; an empty name is still a valid projected field.
+  check('structured field projection hides unrequested notes and tags', fields.data?.tasks?.every(t => !('note' in t) && !('tags' in t) && t.id && typeof t.name === 'string'));
   const badClause = await call('filter_tasks', { and: [{ bogusKey: true }] });
   check('unsupported clause key rejects loudly', badClause.isError === true || badClause.protoError !== undefined,
     (badClause.text || JSON.stringify(badClause.protoError) || '').slice(0, 150));
@@ -285,6 +308,19 @@ if (mode === 'mutate') {
     check('failed atomic batch verifies complete rollback', rollback.isError && rollback.data.rolledBack === true && rollback.data.rollbackStatus === 'complete' && rollback.data.survivingItems.length === 0);
 
     must(await call('set_task_repetition', { task_id: task.taskId, frequency: 'daily', interval: 2, schedule_type: 'from_completion' }), 'set repetition on disposable task');
+    for (const example of [
+      { name: 'next-to-last Friday', due: '2032-01-23T12:00:00', expected: '2032-02-20', fields: { daysOfWeek: [{ day: 'friday', position: -2 }] }, rule: 'BYDAY=-2FR' },
+      { name: 'next-to-last day', due: '2032-02-28T12:00:00', expected: '2032-03-30', fields: { daysOfMonth: [-2] }, rule: 'BYMONTHDAY=-2' }
+    ]) {
+      const name = owned(example.name);
+      const recurring = must(await call('add_omnifocus_task', { name, dueDate: example.due }), `create ${example.name} disposable task`);
+      const rule = must(await call('set_task_repetition', { task_id: recurring.taskId, frequency: 'monthly', schedule_type: 'regularly', ...example.fields }), `set ${example.name} monthly rule`);
+      check(`${example.name} rule verified`, rule.verified === true && rule.repetitionRule.includes(example.rule));
+      must(await call('complete_task', { task_id: recurring.taskId }), `complete ${example.name} occurrence`);
+      const next = JSON.parse(omni(`const tasks = flattenedTasks.filter(t => t.name === ${JSON.stringify(name)} && t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped);
+        return JSON.stringify(tasks.map(t => ({id:t.id.primaryKey,due:t.dueDate ? [t.dueDate.getFullYear(), String(t.dueDate.getMonth()+1).padStart(2,'0'), String(t.dueDate.getDate()).padStart(2,'0')].join('-') : null})));`));
+      check(`${example.name} schedules the correct next calendar date`, next.length === 1 && next[0].due === example.expected, JSON.stringify(next));
+    }
     const content = Buffer.from(`smoke ${stamp}`).toString('base64');
     must(await call('manage_attachments', { operation: 'add', taskId: task.taskId, filename: 'smoke.txt', base64: content }), 'add disposable attachment');
     const attachment = must(await call('manage_attachments', { operation: 'read', taskId: task.taskId, index: 0 }), 'read disposable attachment');

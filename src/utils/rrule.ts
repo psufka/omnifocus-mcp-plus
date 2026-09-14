@@ -27,7 +27,7 @@ export type WeekdayName =
 
 export interface DayOfWeekSpec {
   day: WeekdayName;
-  /** ICS ordinal prefix: 1..4 = "1st".."4th", -1 = "last". Monthly/yearly only. */
+  /** ICS ordinal: 1..4 = first..fourth, -1 = last, -2 = next to last. Monthly/yearly only. */
   position?: number;
 }
 
@@ -79,7 +79,7 @@ const LIST_VALUED_KEYS = new Set([
 ]);
 
 const BARE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const ALLOWED_POSITIONS = [-1, 1, 2, 3, 4];
+const ALLOWED_POSITIONS = [-2, -1, 1, 2, 3, 4];
 
 function pad(n: number, width = 2): string {
   return String(n).padStart(width, '0');
@@ -160,7 +160,7 @@ function normalizeDay(entry: DayOfWeekInput, index: number): DayOfWeekSpec {
   const position = entry.position;
   if (!Number.isInteger(position) || !ALLOWED_POSITIONS.includes(position)) {
     throw new RRuleError(
-      `daysOfWeek[${index}].position must be one of ${ALLOWED_POSITIONS.join(', ')} (1-4 = first through fourth, -1 = last); got ${String(position)}.`
+      `daysOfWeek[${index}].position must be one of ${ALLOWED_POSITIONS.join(', ')} (1-4 = first through fourth, -1 = last, -2 = next to last); got ${String(position)}.`
     );
   }
   return { day, position };
@@ -216,9 +216,9 @@ function buildByMonthDay(frequency: Frequency, daysOfMonth: number[]): string {
     if (!Number.isInteger(day)) {
       throw new RRuleError(`daysOfMonth entries must be whole numbers; got ${String(day)}.`);
     }
-    if (day === 0 || day > 31 || day < -1) {
+    if (day === 0 || day > 31 || day < -2) {
       throw new RRuleError(
-        `daysOfMonth entries must be 1-31, or -1 for the last day of the month; got ${day}.`
+        `daysOfMonth entries must be 1-31, -1 for the last day, or -2 for the next-to-last day of the month; got ${day}.`
       );
     }
     if (seen.has(day)) {

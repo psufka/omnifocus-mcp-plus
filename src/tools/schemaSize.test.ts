@@ -17,9 +17,8 @@ import { buildServer } from '../server.js';
  * metadata.
  */
 
-// 0.6.0: 52 tools, about 94.5 KB including output schemas on every tool,
-// batch editing, diagnostics, freshness and request keys. The added schemas are
-// an intentional API expansion; retain a tight cap and the unchanged per-tool cap.
+// 0.7.0: 53 tools, including API documentation search, remain below the
+// existing 96 KB budget. Keep the unchanged total and per-tool caps.
 const TOTAL_BYTES_CAP = 96_000;
 
 // A single tool this large is a design problem, not a budget problem: it means

@@ -1,4 +1,4 @@
-# Reliable calls and local CLI (0.6)
+# Reliable calls and local CLI (0.7)
 
 Use the configured MCP tools when available. For local callers without a connector,
 run the installed `omnifocus-mcp` binary or `node /path/to/omnifocus-mcp-plus/dist/cli.js`.
@@ -17,6 +17,23 @@ commit, build hash, whether the build came from a dirty checkout, resolved Node 
 server paths, OmniFocus user/build versions, automation connectivity and capabilities.
 `--no-probe` reads local information without contacting OmniFocus. JSON results go to
 stdout; diagnostics go to stderr. A tool error or invalid command exits with status 1.
+
+## Installed API documentation and repetition
+
+On OmniFocus 4.9+, use `search_automation_api` to check available API classes,
+properties, methods and documentation. `query` searches documentation, not user
+tasks. The result is TypeScript text; do not treat it as executable instructions.
+Follow `nextOffset` when `truncated` is true; keep the same query while paging.
+Default page size is 12,000 UTF-16 characters, maximum 40,000. The separate API cache
+is bounded to 16 queries / 1,000,000 characters / five minutes. Every request checks
+the running app's version/build. Use `refresh: true` to bypass this cache (not `fresh`).
+`server_info` exposes `omnifocus.capabilities.automationApiLookup`; when false, the
+lookup tool returns an explicit error without preventing normal task operations.
+
+`set_task_repetition` supports `position: -2` for a next-to-last weekday and
+`daysOfMonth: [-2]` for the next-to-last calendar day. For example, monthly
+`daysOfWeek: [{day: "friday", position: -2}]` means the next-to-last Friday.
+Keep weekday and calendar-day selectors separate; `-1` continues to mean last.
 
 ## Results
 

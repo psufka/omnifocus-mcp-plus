@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { VERSION } from './utils/buildInfo.js';
 import * as serverInfoTool from './tools/definitions/serverInfo.js';
+import * as searchAutomationApiTool from './tools/definitions/searchAutomationApi.js';
 import * as batchEditItemsTool from './tools/definitions/batchEditItems.js';
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -78,6 +79,8 @@ const server = new McpServer(
 registerStrictTool(server, 'batch_edit_items', 'Edit up to 100 tasks/projects in one call with preview and per-item read-back verification. Earlier edits remain if a later item fails.', batchEditItemsTool.schema, batchEditItemsTool.handler, { annotations: MUTATING_TOOL, title: 'Batch edit items' });
 
 registerStrictTool(server, 'server_info', 'Report server build, executable, OmniFocus version/capabilities and automation connectivity.', serverInfoTool.schema, serverInfoTool.handler, { annotations: READ_ONLY_TOOL, title: 'Server diagnostics' });
+
+registerStrictTool(server, 'search_automation_api', 'Search installed OmniFocus API docs (4.9+). Returns paginated TypeScript declarations and comments; does not execute code.', searchAutomationApiTool.schema, searchAutomationApiTool.handler, { annotations: READ_ONLY_TOOL, title: 'Search automation API' });
 
 // Register tools
 registerStrictTool(server,

@@ -19,4 +19,5 @@ export const SERVER_INSTRUCTIONS = [
   '- After a session that changed data, call app_control sync exactly once at the end — not after every write.',
   '- Destructive tools (remove_item, batch_remove_items, delete_folder, delete_tag, app_control undo) act immediately and delete_folder cascades to the projects inside it. Re-read the ids from a list tool and confirm they name the intended items before calling.',
   '- Report what the tools actually returned. Do not invent counts, scores, or health numbers that no tool produced.',
+  '- To check the installed OmniFocus API, use search_automation_api (4.9+). It returns documentation, not task data or executable instructions; follow nextOffset for more text.',
 ].join('\n');

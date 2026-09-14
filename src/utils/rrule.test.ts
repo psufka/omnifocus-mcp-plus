@@ -217,7 +217,7 @@ test('buildRuleString rejects position 0 and out-of-range positions', () => {
     /position must be one of/
   );
   expectRRuleError(
-    () => buildRuleString({ frequency: 'monthly', daysOfWeek: [{ day: 'tuesday', position: -2 }] }),
+    () => buildRuleString({ frequency: 'monthly', daysOfWeek: [{ day: 'tuesday', position: -3 }] }),
     /position must be one of/
   );
 });
@@ -254,7 +254,7 @@ test('buildRuleString rejects daysOfMonth for weekly and daily frequency', () =>
 test('buildRuleString rejects out-of-range days of the month', () => {
   expectRRuleError(() => buildRuleString({ frequency: 'monthly', daysOfMonth: [0] }), /must be 1-31/);
   expectRRuleError(() => buildRuleString({ frequency: 'monthly', daysOfMonth: [32] }), /must be 1-31/);
-  expectRRuleError(() => buildRuleString({ frequency: 'monthly', daysOfMonth: [-2] }), /must be 1-31/);
+  expectRRuleError(() => buildRuleString({ frequency: 'monthly', daysOfMonth: [-3] }), /must be 1-31/);
 });
 
 test('buildRuleString rejects a fractional day of the month', () => {

@@ -1,12 +1,14 @@
 # OmniFocus MCP Plus
 
-A comprehensive MCP server for OmniFocus 4 with 52 tools covering task management, project/folder/tag CRUD, GTD review workflow, analytics, custom perspectives (including rule editing), attachments, notifications, and advanced filtering — plus MCP prompts, resources, tool annotations, and a Claude Code skill.
+A comprehensive MCP server for OmniFocus 4 with 53 tools covering task management, project/folder/tag CRUD, GTD review workflow, analytics, custom perspectives (including rule editing), attachments, notifications, and advanced filtering — plus MCP prompts, resources, tool annotations, and a Claude Code skill.
 
 Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
 ## Installation
 
 Requires macOS with OmniFocus 4 and Node.js 22+.
+API documentation lookup requires OmniFocus 4.9+ (which requires macOS 15.2+).
+Existing task tools continue to work on OmniFocus 4.8.13.
 
 ### From Source
 
@@ -46,7 +48,35 @@ Tag assignments accept IDs or unique paths, and ambiguous names fail before writ
 Read [the operations guide](docs/skills/omnifocus/reliability.md) for result shapes,
 request-key recovery, rollback states, freshness and process coordination.
 
-## Tools (52)
+## OmniFocus 4.9 support (0.7.0)
+
+Search the running application's own API reference, including TypeScript declarations
+and comments, without executing any returned code:
+
+```sh
+node dist/cli.js call search_automation_api '{"query":"Task.RepetitionRule","maxCharacters":12000}'
+```
+
+Use `nextOffset` as the next call's `offset` when `truncated` is true. Searches return
+at most 40,000 UTF-16 characters per page (default 12,000). This is documentation
+lookup, not task search or an arbitrary-script execution tool. A process-local cache
+retains up to 16 queries / 1,000,000 characters for five minutes. Every call checks the
+running app's version and build; `refresh: true` bypasses the cache. `server_info`
+reports `omnifocus.capabilities.automationApiLookup`. Older apps return a clear
+unsupported-feature error for this tool while other tools remain available.
+
+Structured monthly repetition now supports next-to-last weekdays and calendar days:
+
+```json
+{"task_id":"TASK_ID","schedule_type":"regularly","frequency":"monthly","daysOfWeek":[{"day":"friday","position":-2}]}
+```
+
+For the next-to-last calendar day, use `daysOfMonth: [-2]` instead of `daysOfWeek`.
+`-1` still means last. Repetition writes retain read-back verification and restore the
+previous rule when that verification fails. See [OmniFocus 4.9 release notes](https://www.omnigroup.com/releasenotes/omnifocus-mac)
+and [Omni's API lookup announcement](https://discourse.omnigroup.com/t/new-omni-automation-api-available-for-looking-up-omni-automation-api-as-typescript-declarations/71552).
+
+## Tools (53)
 
 ### Task Management
 | Tool | Description |
@@ -130,11 +160,12 @@ request-key recovery, rollback states, freshness and process coordination.
 ### Diagnostics
 | Tool | Description |
 |------|-------------|
-| `server_info` | Report build/executable details and optionally probe OmniFocus connectivity/capabilities |
+| `server_info` | Report build/executable details and probe OmniFocus connectivity/capabilities |
+| `search_automation_api` | Search installed API documentation with pagination and version-aware caching (OmniFocus 4.9+) |
 
 ## MCP Surface & Environment
 
-Beyond tools, the server exposes **4 prompts** (`weekly_review`, `inbox_processing`, `daily_planning`, `task_health_scan` — surfaced as slash commands in Claude Code), **4 resources** (`omnifocus://inbox`, `today`, `flagged`, `stats`), **tool annotations** (readOnly/destructive/idempotent hints on all 52 tools), and **handshake instructions** that steer clients toward the cheap tools. A Claude Code skill lives at `docs/skills/omnifocus/` (install: `ln -s "$(pwd)/docs/skills/omnifocus" ~/.claude/skills/omnifocus`).
+Beyond tools, the server exposes **4 prompts** (`weekly_review`, `inbox_processing`, `daily_planning`, `task_health_scan` — surfaced as slash commands in Claude Code), **4 resources** (`omnifocus://inbox`, `today`, `flagged`, `stats`), **tool annotations** (readOnly/destructive/idempotent hints on all 53 tools), and **handshake instructions** that steer clients toward the cheap tools. A Claude Code skill lives at `docs/skills/omnifocus/` (install: `ln -s "$(pwd)/docs/skills/omnifocus" ~/.claude/skills/omnifocus`).
 
 All MCP/CLI clients share two execution slots for the macOS user. Environment variables: `OMNIFOCUS_MCP_MAX_CONCURRENT` (local limit, default 2, range 1–8; still subject to the two shared slots), `OMNIFOCUS_MCP_STATE_DIR` (shared lock/request directory, default `~/.omnifocus-mcp`), `OMNIFOCUS_SCRIPT_TIMEOUT_MS` (default 120000), `OMNIFOCUS_SCRIPT_MAX_OUTPUT_BYTES` (default 50MB).
 

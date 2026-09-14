@@ -5,11 +5,13 @@ description: Use when working with OmniFocus tasks, projects, folders, tags, or 
 
 # OmniFocus
 
-The `omnifocus` MCP server exposes 52 tools over a live OmniFocus 4 database on
+The `omnifocus` MCP server exposes 53 tools over a live OmniFocus 4 database on
 macOS. Writes take effect immediately; there is no staging area. See
 `filters.md` in this directory for the full `filter_tasks` field reference.
 Read [reliability.md](reliability.md) when using the local CLI, batch edits, request
 keys, fresh reads, or recovering a failed write. `server_info` verifies the loaded release.
+For installed API documentation (OmniFocus 4.9+), use `search_automation_api`;
+see the API lookup and repetition section in [reliability.md](reliability.md).
 
 ## Pick the right tool
 

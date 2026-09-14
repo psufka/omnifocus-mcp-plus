@@ -2,6 +2,23 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [0.7.0] - 2026-09-14
+
+### Added
+- `search_automation_api`: read-only search of the running OmniFocus 4.9+ API documentation using `app.getTypeScriptDeclarations`. Returns TypeScript declarations and comments in bounded pages, with version/build metadata, explicit truncation and continuation offsets. Search text and returned documentation are never executed as code.
+- API documentation cache with five-minute expiry, up to 16 queries and 1,000,000 UTF-16 characters. Every lookup checks the running app version/build, including cache hits; `refresh` forces regeneration. This cache is independent of task-data caches.
+- `server_info` now reports `omnifocus.capabilities.automationApiLookup` by checking for the actual method. Older OmniFocus versions return an explicit lookup-unavailable error and retain their existing tools.
+- Structured repetition accepts `position: -2` for next-to-last weekdays and `daysOfMonth: [-2]` for the next-to-last calendar day, matching the expanded OmniFocus 4.9 repeat options. Existing recurrence validation and read-back/restore behavior remain in place.
+
+### Fixed
+- Updated the SDK's transitive Hono dependency from 4.13.1 to 4.13.7 through Socket Firewall, addressing the newly reported dependency advisories.
+- Isolated fake-process concurrency tests from the user's live OmniFocus execution slots. The projection smoke assertion now accepts valid untitled tasks.
+
+### Verification
+- Behavioral tests cover older apps, API lookup, query/code separation, empty matches, unexpected results, pagination, cache expiry/refresh/version/build changes, and cache bounds; recurrence tests cover new patterns and invalid combinations.
+- Smoke coverage now includes API capability detection, native-documentation comparison, pagination, caching/refresh and invalid-input rejection. Disposable recurrence checks verify both stored rules and the next occurrence's actual calendar date.
+- The 53-tool surface remains within the existing 96 KB total schema budget and 12 KB per-tool cap.
+
 ## [0.6.1] - 2026-09-05
 
 ### Fixed

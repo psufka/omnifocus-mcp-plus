@@ -13,8 +13,8 @@ const dayNameEnum = z.enum([
 // the ordinal position and produce "every Tuesday" instead of "2nd Tuesday".
 const dayOfWeekSpec = z.object({
   day: dayNameEnum,
-  position: z.number().int().min(-1).max(4).optional()
-    .describe("Ordinal position within the month: 1-4 = first through fourth, -1 = last. Requires frequency 'monthly' or 'yearly'. Omit for 'every <day>'.")
+  position: z.number().int().min(-2).max(4).optional()
+    .describe("Ordinal position: 1-4 = first through fourth, -1 = last, -2 = next to last. Requires frequency 'monthly' or 'yearly'. Omit for 'every <day>'.")
 }).strict();
 
 /** Structured fields, listed once so the refinements and the handler agree. */
@@ -41,7 +41,7 @@ export const baseSchema = z.object({
   daysOfWeek: z.array(z.union([dayNameEnum, dayOfWeekSpec])).min(1).optional()
     .describe(`Structured repetition: which weekdays. Either plain names (${WEEKDAY_NAMES.join('/')}) or objects like { day: 'tuesday', position: 2 } for '2nd Tuesday' / { day: 'friday', position: -1 } for 'last Friday'. Positions require frequency 'monthly' or 'yearly'. Cannot be used with frequency 'daily' or together with daysOfMonth.`),
   daysOfMonth: z.array(z.number().int()).min(1).optional()
-    .describe("Structured repetition: days of the month, 1-31, or -1 for the last day. Requires frequency 'monthly' or 'yearly'. Cannot be combined with daysOfWeek."),
+    .describe("Structured repetition: days of the month, 1-31, -1 for the last day, or -2 for the next-to-last day. Requires frequency 'monthly' or 'yearly'. Cannot be combined with daysOfWeek."),
   count: z.number().int().min(1).optional()
     .describe("Structured repetition: stop after this many occurrences (ICS COUNT). Mutually exclusive with endDate."),
   endDate: optionalIsoDate("Structured repetition: stop repeating after this date (ICS UNTIL). Bare 'YYYY-MM-DD' emits the ICS DATE form for that calendar day; a full date-time is converted to the UTC form the ICS spec requires. Mutually exclusive with count.")
