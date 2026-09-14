@@ -29,6 +29,17 @@ const CACHE_TTL_MS = 300_000;
 const MAX_ENTRIES = 16;
 const MAX_CACHE_CHARACTERS = 1_000_000;
 
+/** OmniFocus 4.9 prepends a generated timestamp and tsconfig setup guide to
+ * every result, including no matches. Remove only that recognized preamble,
+ * preserving the API sections and their comments. This keeps pages stable. */
+export function normalizeApiDocumentation(text: string): string {
+  if (!text.startsWith('// TypeScript definitions for OmniFocus ')) return text;
+  const endMarker = '\n// }\n';
+  const end = text.indexOf(endMarker);
+  if (end < 0 || !text.slice(0, end).includes('// To use these definitions, save this file as')) return text;
+  return text.slice(end + endMarker.length).replace(/^\n+/, '');
+}
+
 /** Separate from task-data caching: keyed by query + verified app version/build,
  * bounded by age, entry count and total text size. Injectable for behavioral tests. */
 export function createAutomationApiSearch(execute = runOmniJs, now = Date.now) {
@@ -52,7 +63,7 @@ export function createAutomationApiSearch(execute = runOmniJs, now = Date.now) {
       query, cachedVersion: candidate?.version ?? null, cachedBuild: candidate?.build ?? null
     }, { readOnly: true });
     if (!result.success) { cache.delete(query); return { ...result, query }; }
-    const declarations: string = result.cacheHit ? candidate!.declarations : result.declarations;
+    const declarations: string = result.cacheHit ? candidate!.declarations : normalizeApiDocumentation(result.declarations);
     const fetchedAt = result.cacheHit ? candidate!.fetchedAt : now();
     cache.delete(query);
     if (result.version && result.build) {

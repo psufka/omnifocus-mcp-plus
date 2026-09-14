@@ -243,10 +243,10 @@ registerStrictTool(server,
 
 registerStrictTool(server,
   "complete_task",
-  "Mark a task as completed (mirror of uncomplete_task). Idempotent: completing an already-completed task succeeds with a note.",
+  "Complete a task. Already-completed tasks are unchanged; repeating tasks advance on each call, so do not blindly retry.",
   completeTaskTool.schema,
   completeTaskTool.handler,
-  { annotations: { ...MUTATING_TOOL, destructiveHint: false, idempotentHint: true }, title: "Complete task" }
+  { annotations: { ...MUTATING_TOOL, destructiveHint: false, idempotentHint: false }, title: "Complete task" }
 );
 
 registerStrictTool(server,

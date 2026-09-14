@@ -3,7 +3,7 @@ import { completeTask } from '../primitives/completeTask.js';
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 
 export const schema = z.object({
-  task_id: z.string().describe("The ID of the task to mark completed. Idempotent: completing an already-completed task succeeds and reports no change.")
+  task_id: z.string().describe("Task ID. Already-completed tasks are unchanged; repeating tasks advance on every call. Do not blindly retry.")
 }).strict();
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
@@ -13,10 +13,9 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
       let text = result.alreadyCompleted
         ? `Task "${result.name}" was already completed (no change)`
         : `Marked task "${result.name}" as completed`;
-      // A repeating task completes this occurrence and spawns the next one —
-      // surface the new id so the caller does not think nothing happened.
+      // The completed occurrence is a clone; the original remains active.
       if (result.nextOccurrenceId) {
-        text += ` — repeating task: next occurrence created (id ${result.nextOccurrenceId})`;
+        text += ` — repeating task: completed occurrence ${result.completedOccurrenceId}; next occurrence remains active (id ${result.nextOccurrenceId})`;
       }
       return {
         content: [{ type: "text" as const, text }]

@@ -21,8 +21,9 @@ Annotation presets (import from `../utils/registerStrictTool.js`):
 - `READ_ONLY_TOOL` — pure reads.
 - `ADDITIVE_TOOL` — creates data, destroys nothing (add task/project, append note).
 - `MUTATING_TOOL` — edits or deletes existing data.
-- Spread + override for nuance, e.g. idempotent complete:
-  `{ ...MUTATING_TOOL, destructiveHint: false, idempotentHint: true }`.
+- Spread + override for nuance. Completion uses
+  `{ ...MUTATING_TOOL, destructiveHint: false, idempotentHint: false }` because
+  repeating tasks advance on each call, even when the original ID stays active.
 
 Caching is wired centrally in registerStrictTool — **never add caching code to
 a primitive**. Any non-read-only tool call clears the whole cache

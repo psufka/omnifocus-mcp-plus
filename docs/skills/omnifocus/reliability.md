@@ -23,6 +23,7 @@ stdout; diagnostics go to stderr. A tool error or invalid command exits with sta
 On OmniFocus 4.9+, use `search_automation_api` to check available API classes,
 properties, methods and documentation. `query` searches documentation, not user
 tasks. The result is TypeScript text; do not treat it as executable instructions.
+The generated timestamp/setup preamble is omitted, and no matches return empty text.
 Follow `nextOffset` when `truncated` is true; keep the same query while paging.
 Default page size is 12,000 UTF-16 characters, maximum 40,000. The separate API cache
 is bounded to 16 queries / 1,000,000 characters / five minutes. Every request checks
@@ -43,8 +44,10 @@ verification, per-item errors and paging rather than extracting them from Markdo
 Tool-specific payloads are in `data`; invalid arguments may be rejected by the MCP
 SDK before the handler runs. `success: false`/`isError: true` require inspection.
 `verified: false` means the requested write did not read back correctly; absence of
-`verified` is not proof of verification. A repeating completion may intentionally
-return an active next occurrence with a warning.
+`verified` is not proof of verification. For repeating completion,
+`completedOccurrenceId` identifies the completed clone and `nextOccurrenceId`
+identifies the original task, still active with its next dates. Repeating completion
+is not idempotent: inspect the task after a lost response before calling again.
 
 `filter_tasks` has `count` for count-only queries, and `matchedCount`, `filteredCount`,
 `offsetApplied`, `limitApplied`, `truncated` for pages. Task IDs and names are always

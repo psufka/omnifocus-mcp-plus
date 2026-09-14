@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { createAutomationApiSearch } from './searchAutomationApi.js';
+import { createAutomationApiSearch, normalizeApiDocumentation } from './searchAutomationApi.js';
 import { schema } from '../definitions/searchAutomationApi.js';
 import { DIAGNOSTIC_SCRIPT } from '../definitions/serverInfo.js';
 
@@ -87,6 +87,21 @@ test('empty matches succeed and unexpected documentation formats fail without ca
   const result = await invalid.search({ query: 'Task' });
   assert.equal(result.success, false);
   assert.match(result.error, /unexpected API documentation format/);
+});
+
+test('native 4.9 timestamp/setup preamble is omitted, including on no-match searches', async () => {
+  const header = '// TypeScript definitions for OmniFocus 4.9 (187.2.1) on macOS 26.6.2\n' +
+    '// Generated on 2026-09-14 15:41:25 +0000 -- Filtered by "Task"\n\n' +
+    '// To use these definitions, save this file as `OmniFocus.d.ts`\n' +
+    '// and create a `tsconfig.json` file with compiler settings which indicate\n' +
+    '// an appropriate set of implicitly defined TypeScript libraries:\n//\n// {\n' +
+    '//     "compilerOptions": {\n//         "lib": ["es7"]\n//     }\n// }\n\n\n';
+  const body = '// Task\n\ndeclare class Task { name: string; }\n';
+  assert.equal(normalizeApiDocumentation(header + body), body);
+  assert.equal((await fixture(header).search({ query: 'missing' })).declarations, '');
+  assert.equal((await fixture(header + body).search({ query: 'Task' })).declarations, body);
+  assert.equal(normalizeApiDocumentation('// unfamiliar header\ndeclare class Task {}'), '// unfamiliar header\ndeclare class Task {}');
+  assert.equal(normalizeApiDocumentation('// TypeScript definitions for OmniFocus future\n// incomplete header'), '// TypeScript definitions for OmniFocus future\n// incomplete header');
 });
 
 test('API cache evicts least recently used queries and bounds retained text size', async () => {

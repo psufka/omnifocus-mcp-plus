@@ -1,15 +1,15 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
 
 /**
- * Mark a task complete. Idempotent: completing an already-completed task is a
- * success with `alreadyCompleted: true`, not an error — a retry after a timeout
- * must not read as a failure.
+ * Mark a task complete. An already-completed task returns `alreadyCompleted`.
+ * Repeating tasks retain an active original, so completing them again advances
+ * another occurrence. A lost response must not be blindly retried.
  *
  * The write is verified by reading the task back inside the SAME script: a
  * markComplete() that silently did nothing is reported as a failure instead of
  * being announced as success. Repeating tasks are the documented exception —
- * OmniFocus completes this occurrence and returns a NEW task for the next one,
- * so a fresh occurrence id counts as verification.
+ * OmniFocus returns the task that was completed. For repetition, that is a new
+ * completed clone; the original task remains active with its next dates.
  */
 export async function completeTask(taskId: string): Promise<{
   success: boolean;
@@ -18,9 +18,13 @@ export async function completeTask(taskId: string): Promise<{
   alreadyCompleted?: boolean;
   verified?: boolean;
   nextOccurrenceId?: string;
+  completedOccurrenceId?: string;
   error?: string;
 }> {
-  const script = `
+  return await runOmniJs(COMPLETE_TASK_SCRIPT, { task_id: taskId });
+}
+
+export const COMPLETE_TASK_SCRIPT = `
     // "[object Task.Status: Available]" -> "Available" (OmniJS enums have no .name).
     function __statusName(status) {
       try {
@@ -61,14 +65,18 @@ export async function completeTask(taskId: string): Promise<{
 
     // --- Read-back verification (same script; sync cannot intervene) ---
     let nextOccurrenceId = null;
+    let completedOccurrenceId = null;
+    const completed = (task.taskStatus === Task.Status.Completed) || task.completed === true;
     try {
-      if (produced && produced.id && produced.id.primaryKey !== taskId) {
-        nextOccurrenceId = produced.id.primaryKey;
+      if (produced && produced.id && (produced.taskStatus === Task.Status.Completed || produced.completed === true)) {
+        completedOccurrenceId = produced.id.primaryKey;
+        if (!completed && task.taskStatus !== Task.Status.Dropped && task.repetitionRule && completedOccurrenceId !== taskId) {
+          nextOccurrenceId = taskId;
+        }
       }
     } catch (e) {}
 
-    const completed = (task.taskStatus === Task.Status.Completed) || task.completed === true;
-    const verified = completed || nextOccurrenceId !== null;
+    const verified = completed || completedOccurrenceId !== null;
 
     if (!verified) {
       return JSON.stringify({
@@ -86,8 +94,7 @@ export async function completeTask(taskId: string): Promise<{
       name: taskName,
       alreadyCompleted: false,
       verified: true,
+      completedOccurrenceId: completedOccurrenceId || (completed ? taskId : undefined),
       nextOccurrenceId: nextOccurrenceId || undefined
     });
-  `;
-  return await runOmniJs(script, { task_id: taskId });
-}
+`;

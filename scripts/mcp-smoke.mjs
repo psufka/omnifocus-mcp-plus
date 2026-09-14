@@ -109,6 +109,7 @@ check('all schemas strict (additionalProperties:false)', nonStrict.length === 0,
 const unannotated = tools.filter((t) => !t.annotations || t.annotations.readOnlyHint === undefined);
 check('all tools advertise output schemas', tools.every(t => t.outputSchema && t.outputSchema.properties?.success));
 check('all tools annotated', unannotated.length === 0, unannotated.slice(0, 5).map((t) => t.name).join(','));
+check('completion does not advertise idempotence', tools.find(t => t.name === 'complete_task')?.annotations?.idempotentHint === false);
 
 const prompts = await rpc('prompts/list', {});
 check('prompts/list has 4 prompts', (prompts.result?.prompts ?? []).length === 4,
@@ -134,7 +135,10 @@ if (mode === 'read') {
     const page1 = await call('search_automation_api', { query: 'Task', maxCharacters: 256 });
     const page2 = await call('search_automation_api', { query: 'Task', maxCharacters: 256, offset: page1.data.nextOffset });
     const actualDocs = omni(`return app.getTypeScriptDeclarations('Task');`);
-    check('API pages match the native documentation', !page1.isError && !page2.isError && page1.data.truncated === true && page1.data.declarations.length <= 256 && page2.data.declarations.length <= 256 && page1.data.declarations + page2.data.declarations === actualDocs.slice(0, page1.data.declarations.length + page2.data.declarations.length));
+    // Native results include a per-call timestamp and generic tsconfig guide.
+    // The tool omits that preamble and begins at the first API section heading.
+    const nativeApiBody = actualDocs.slice(actualDocs.indexOf('\n// }\n') + '\n// }\n'.length).replace(/^\n+/, '');
+    check('API pages match the native documentation', !page1.isError && !page2.isError && page1.data.truncated === true && page1.data.declarations.length <= 256 && page2.data.declarations.length <= 256 && page1.data.declarations + page2.data.declarations === nativeApiBody.slice(0, page1.data.declarations.length + page2.data.declarations.length));
     const noMatch = await call('search_automation_api', { query: 'NoSuchOmniApi_5a9f81e3' });
     check('API no-match query is an empty success', !noMatch.isError && noMatch.data.totalCharacters === 0 && noMatch.data.declarations === '');
   } else {
@@ -316,10 +320,13 @@ if (mode === 'mutate') {
       const recurring = must(await call('add_omnifocus_task', { name, dueDate: example.due }), `create ${example.name} disposable task`);
       const rule = must(await call('set_task_repetition', { task_id: recurring.taskId, frequency: 'monthly', schedule_type: 'regularly', ...example.fields }), `set ${example.name} monthly rule`);
       check(`${example.name} rule verified`, rule.verified === true && rule.repetitionRule.includes(example.rule));
-      must(await call('complete_task', { task_id: recurring.taskId }), `complete ${example.name} occurrence`);
+      const completion = must(await call('complete_task', { task_id: recurring.taskId }), `complete ${example.name} occurrence`);
       const next = JSON.parse(omni(`const tasks = flattenedTasks.filter(t => t.name === ${JSON.stringify(name)} && t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped);
         return JSON.stringify(tasks.map(t => ({id:t.id.primaryKey,due:t.dueDate ? [t.dueDate.getFullYear(), String(t.dueDate.getMonth()+1).padStart(2,'0'), String(t.dueDate.getDate()).padStart(2,'0')].join('-') : null})));`));
       check(`${example.name} schedules the correct next calendar date`, next.length === 1 && next[0].due === example.expected, JSON.stringify(next));
+      check(`${example.name} completion reports the active and completed IDs correctly`,
+        completion.nextOccurrenceId === next[0]?.id && completion.completedOccurrenceId !== completion.nextOccurrenceId &&
+        omni(`const t = Task.byIdentifier(${JSON.stringify(completion.completedOccurrenceId)}); return String(!!t && t.taskStatus === Task.Status.Completed);`) === 'true');
     }
     const content = Buffer.from(`smoke ${stamp}`).toString('base64');
     must(await call('manage_attachments', { operation: 'add', taskId: task.taskId, filename: 'smoke.txt', base64: content }), 'add disposable attachment');

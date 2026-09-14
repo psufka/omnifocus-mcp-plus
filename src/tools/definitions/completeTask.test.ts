@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { schema } from './completeTask.js';
+import { runInNewContext } from 'node:vm';
+import { COMPLETE_TASK_SCRIPT } from '../primitives/completeTask.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -63,19 +65,41 @@ test('completeTask reads the task back and reports whether the write landed', ()
   assert.match(src, /success: false,[\s\S]{0,200}verified: false/, 'an unverified completion must not report success');
 });
 
-test('completeTask treats a repeating task as verified via its new occurrence', () => {
-  const src = readPrimitive('completeTask.ts');
-  // markComplete() on a repeating task completes this occurrence and returns
-  // the NEW task, so the original may not read as Completed.
-  assert.match(src, /produced = task\.markComplete\(\)/, 'markComplete result is discarded');
-  assert.match(src, /nextOccurrenceId/, 'the new occurrence id is not captured');
-  assert.match(src, /const verified = completed \|\| nextOccurrenceId !== null/, 'a repeating completion would read as unverified');
+function executeCompletion(task: any) {
+  return JSON.parse(runInNewContext(`(function () { ${COMPLETE_TASK_SCRIPT} })()`, {
+    args: { task_id: 'original' }, flattenedTasks: [task],
+    Task: { Status: { Completed: 'Completed', Dropped: 'Dropped' } }
+  }));
+}
+
+test('repeating completion distinguishes the completed clone from the active original', () => {
+  const task = { id: { primaryKey: 'original' }, name: 'repeat', taskStatus: 'Available', repetitionRule: {},
+    markComplete: () => ({ id: { primaryKey: 'completed-clone' }, taskStatus: 'Completed' }) };
+  const result = executeCompletion(task);
+  assert.equal(result.verified, true);
+  assert.equal(result.completedOccurrenceId, 'completed-clone');
+  assert.equal(result.nextOccurrenceId, 'original');
+});
+
+test('a different returned ID without completed status is not proof of completion', () => {
+  const task = { id: { primaryKey: 'original' }, name: 'repeat', taskStatus: 'Available', repetitionRule: {},
+    markComplete: () => ({ id: { primaryKey: 'another' }, taskStatus: 'Available' }) };
+  assert.equal(executeCompletion(task).verified, false);
+});
+
+test('ordinary completion reports the completed original without a next occurrence', () => {
+  const task: any = { id: { primaryKey: 'original' }, name: 'once', taskStatus: 'Available',
+    markComplete() { this.taskStatus = 'Completed'; return this; } };
+  const result = executeCompletion(task);
+  assert.equal(result.completedOccurrenceId, 'original');
+  assert.equal(result.nextOccurrenceId, undefined);
+  assert.equal(result.verified, true);
 });
 
 test('complete_task handler surfaces the next occurrence of a repeating task', () => {
   const def = readFileSync(join(here, 'completeTask.ts'), 'utf8');
   assert.match(def, /result\.nextOccurrenceId/, 'handler hides the new occurrence');
-  assert.match(def, /next occurrence created/, 'handler does not explain the repeat');
+  assert.match(def, /next occurrence remains active/, 'handler does not explain the repeat');
 });
 
 test('complete/uncomplete handlers report the no-change case distinctly', () => {

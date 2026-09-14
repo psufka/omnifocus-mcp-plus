@@ -58,8 +58,10 @@ node dist/cli.js call search_automation_api '{"query":"Task.RepetitionRule","max
 ```
 
 Use `nextOffset` as the next call's `offset` when `truncated` is true. Searches return
-at most 40,000 UTF-16 characters per page (default 12,000). This is documentation
-lookup, not task search or an arbitrary-script execution tool. A process-local cache
+at most 40,000 UTF-16 characters per page (default 12,000). The generated timestamp
+and setup preamble are omitted; API comments are retained. An unmatched query returns
+empty text. This is documentation lookup, not task search or an arbitrary-script
+execution tool. A process-local cache
 retains up to 16 queries / 1,000,000 characters for five minutes. Every call checks the
 running app's version and build; `refresh: true` bypasses the cache. `server_info`
 reports `omnifocus.capabilities.automationApiLookup`. Older apps return a clear
