@@ -1,6 +1,6 @@
 # OmniFocus MCP Plus
 
-A comprehensive MCP server for OmniFocus 4 with 53 tools covering task management, project/folder/tag CRUD, GTD review workflow, analytics, custom perspectives (including rule editing), attachments, notifications, and advanced filtering — plus MCP prompts, resources, tool annotations, and a Claude Code skill.
+MCP server and CLI for OmniFocus 4
 
 Originally forked from [jqlts1/omnifocus-mcp-enhanced](https://github.com/jqlts1/omnifocus-mcp-enhanced). Additional tools inspired by [vitalyrodnenko/OmnifocusMCP](https://github.com/vitalyrodnenko/OmnifocusMCP).
 
