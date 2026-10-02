@@ -115,7 +115,7 @@ and [Omni's API lookup announcement](https://discourse.omnigroup.com/t/new-omni-
 | `get_tasks_by_tag` | Get tasks by tag name |
 | `get_today_completed_tasks` | Get tasks completed today |
 | `get_task_counts` | Aggregate counts: total, available, completed, overdue, due soon, flagged |
-| `get_custom_perspective_tasks` | Get tasks from a custom perspective |
+| `get_custom_perspective_tasks` | Get tasks from a saved custom perspective in a temporary window, independent of the current window's search or sidebar selection; the temporary window closes after the read |
 | `list_custom_perspectives` | List all custom perspectives (includeRules returns their filter rules) |
 | `update_perspective_rules` | Edit a custom perspective's filter rules — validated, read-back verified, undo-able |
 | `dump_database` | Full database export |

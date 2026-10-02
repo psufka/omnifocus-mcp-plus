@@ -28,13 +28,14 @@ export async function getCustomPerspectiveTasks(options: GetCustomPerspectiveTas
   } = options;
 
   if (!perspectiveName) {
+    recordToolData({ success: false, error: 'perspective name cannot be empty' });
     return 'Error: perspective name cannot be empty';
   }
 
   try {
     const result = await executeOmniFocusScript('@getCustomPerspectiveTasks.js', {
       perspectiveName
-    });
+    }, { perspectiveWindow: perspectiveName });
 
     const data = parseScriptResult(result);
     if (!data.success) {
@@ -75,7 +76,9 @@ export async function getCustomPerspectiveTasks(options: GetCustomPerspectiveTas
     return formatProjectTree(perspectiveName, tree.projectGroups, tree.flatTasks.length, totalCount, truncationNote);
   } catch (error) {
     console.error('Error in getCustomPerspectiveTasks:', error);
-    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+    const message = error instanceof Error ? error.message : String(error);
+    recordToolData({ success: false, error: message });
+    return `Error: ${message}`;
   }
 }
 
