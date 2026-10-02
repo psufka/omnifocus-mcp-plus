@@ -433,7 +433,7 @@ registerStrictTool(server,
 
 registerStrictTool(server,
   "manage_reviews",
-  "Project review workflow. 'list_due' lists projects whose review date has arrived (all: true = every scheduled project); 'mark_reviewed' stamps one project or up to 100 via projectIds and advances each next review date by its own interval; 'set_schedule' sets the review interval (unit + steps).",
+  "Project reviews: list_due returns reviewable projects (all includes future reviews; dropped folders excluded); mark_reviewed advances review dates for one project or up to 100 IDs; set_schedule changes the review interval.",
   manageReviewsTool.schema,
   manageReviewsTool.handler,
   { annotations: MUTATING_TOOL, title: "Manage project reviews" }

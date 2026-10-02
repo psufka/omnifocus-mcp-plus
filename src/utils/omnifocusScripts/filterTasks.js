@@ -420,17 +420,6 @@
     // this is a packaged script file executed by path, so the semantics are
     // restated here rather than imported.
     // ---------------------------------------------------------------------
-    function folderStatusLabel(folder) {
-      try {
-        const raw = String(folder.status);
-        const marker = raw.indexOf(': ');
-        if (marker >= 0 && raw.charAt(raw.length - 1) === ']') return raw.slice(marker + 2, -1);
-        return '';
-      } catch (error) {
-        return '';
-      }
-    }
-
     function resolveScopeFolder() {
       if (filters.folderId) {
         const byId = (typeof Folder !== 'undefined' && Folder.byIdentifier)
@@ -456,7 +445,7 @@
         return { error: 'Folder not found: ' + filters.folderName };
       }
       if (matches.length > 1) {
-        const active = matches.filter(folder => folderStatusLabel(folder) !== 'Dropped');
+        const active = matches.filter(folder => folder.effectiveActive);
         if (active.length === 1) matches = active;
       }
       if (matches.length > 1) {

@@ -523,7 +523,7 @@ function fakeTask(name: string, taskStatus: string, extra: Record<string, any> =
   };
 }
 
-function runFilterScript(tasks: any[], args: Record<string, any>, now?: Date): any {
+function runFilterScript(tasks: any[], args: Record<string, any>, now?: Date, folders: any[] = []): any {
   // The file is one IIFE statement; as an expression it must lose its
   // statement-terminating semicolon.
   const scriptExpression = readScript().trim().replace(/;$/, '');
@@ -539,9 +539,90 @@ function runFilterScript(tasks: any[], args: Record<string, any>, now?: Date): a
     `return (\n${scriptExpression}\n);`
   );
   const Clock = now ? new Function('NativeDate', 'now', 'return class extends NativeDate { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }')(Date, now.getTime()) : Date;
-  const raw = fn(args, tasks, [], { Status: FAKE_TASK_STATUS }, { byIdentifier: () => null }, Clock);
+  const raw = fn(args, tasks, folders, { Status: FAKE_TASK_STATUS }, {
+    byIdentifier: (id: string) => folders.find(folder => folder.id.primaryKey === id) || null,
+  }, Clock);
   return JSON.parse(raw);
 }
+
+function fakeScopeFolder(id: string, name: string, parent: any = null, active = true): any {
+  return {
+    id: { primaryKey: id }, name, parent,
+    status: `[object Folder.Status: ${active ? 'Active' : 'Dropped'}]`,
+    get effectiveActive(): boolean { return active && (!parent || parent.effectiveActive); },
+  };
+}
+
+function taskInScopeFolder(name: string, folder: any) {
+  return fakeTask(name, folder.effectiveActive ? 'Available' : 'Dropped', {
+    inInbox: false,
+    containingProject: { id: { primaryKey: name }, name: `${name} project`, parentFolder: folder },
+  });
+}
+
+test('folder scope prefers the live folder for exact and substring matches across dropped ancestors', () => {
+  const archive = fakeScopeFolder('archive', 'History', null, false);
+  const middle = fakeScopeFolder('middle', 'Older work', archive);
+  const historical = [
+    fakeScopeFolder('direct-dropped', 'Research', null, false),
+    fakeScopeFolder('dropped-parent', 'Research', archive),
+    fakeScopeFolder('dropped-ancestor', 'Research', middle),
+  ];
+  const live = fakeScopeFolder('live', 'Research');
+  const child = fakeScopeFolder('child', 'Experiments', live);
+  const folders = [archive, middle, ...historical, live, child];
+  const tasks = [
+    ...historical.map(folder => taskInScopeFolder(folder.id.primaryKey, folder)),
+    taskInScopeFolder('Live action', live),
+    taskInScopeFolder('Nested action', child),
+    fakeTask('Inbox action', 'Available'),
+  ];
+
+  for (const folderName of ['RESEARCH', 'search']) {
+    const result = runFilterScript(tasks, { folderName, taskStatus: ['Available', 'Dropped'] }, undefined, folders);
+    assert.deepEqual(result.tasks?.map((task: any) => task.name), ['Live action', 'Nested action'], JSON.stringify(result));
+  }
+});
+
+test('folder scope allows explicit IDs and unique names to access historical tasks', () => {
+  const archive = fakeScopeFolder('archive', 'History', null, false);
+  const dropped = fakeScopeFolder('old-research', 'Research', archive);
+  const live = fakeScopeFolder('live', 'Research');
+  const tasks = [taskInScopeFolder('Historical action', dropped), taskInScopeFolder('Live action', live)];
+  const names = (result: any) => result.tasks?.map((task: any) => task.name);
+
+  const byId = runFilterScript(tasks, {
+    folderId: dropped.id.primaryKey, folderName: 'Research', taskStatus: ['Dropped'],
+  }, undefined, [archive, dropped, live]);
+  assert.deepEqual(names(byId), ['Historical action'], JSON.stringify(byId));
+
+  for (const folderName of ['RESEARCH', 'search']) {
+    const unique = runFilterScript(tasks, { folderName, taskStatus: ['Dropped'] }, undefined, [archive, dropped]);
+    assert.deepEqual(names(unique), ['Historical action'], JSON.stringify(unique));
+  }
+
+  const missingId = runFilterScript(tasks, { folderId: 'missing', folderName: 'Research' }, undefined, [live]);
+  assert.match(missingId.error, /Folder not found with ID: missing/);
+  assert.match(missingId.error, /folderName was NOT tried/);
+});
+
+test('folder scope keeps genuine ambiguity and exact-name precedence', () => {
+  for (const active of [true, false]) {
+    const folders = [fakeScopeFolder('first', 'Research', null, active), fakeScopeFolder('second', 'Research', null, active)];
+    for (const folderName of ['Research', 'search']) {
+      const result = runFilterScript([], { folderName }, undefined, folders);
+      assert.match(result.error, /Ambiguous folder name/);
+      assert.match(result.error, /first/);
+      assert.match(result.error, /second/);
+    }
+  }
+
+  const exact = fakeScopeFolder('exact', 'Research', null, false);
+  const partial = fakeScopeFolder('partial', 'Research Lab');
+  const tasks = [taskInScopeFolder('Exact action', exact), taskInScopeFolder('Partial action', partial)];
+  const result = runFilterScript(tasks, { folderName: 'Research', taskStatus: ['Available', 'Dropped'] }, undefined, [exact, partial]);
+  assert.deepEqual(result.tasks?.map((task: any) => task.name), ['Exact action'], JSON.stringify(result));
+});
 
 const MIXED_STATUS_TASKS = [
   fakeTask('Live one', 'Available'),

@@ -85,11 +85,12 @@
         };
 
         // Filter active projects first to avoid unnecessary processing
-        // (done/dropped projects are only included when completed items were requested)
+        // (including projects dropped through a containing folder)
         const selectedProjects = flattenedProjects.filter(project =>
           includeCompleted || (
             project.status !== Project.Status.Done &&
-            project.status !== Project.Status.Dropped
+            project.status !== Project.Status.Dropped &&
+            project.task.taskStatus !== Task.Status.Dropped
           )
         );
 
@@ -102,12 +103,12 @@
         // Pre-filter active folders (dropped folders would orphan their projects when
         // completed items are requested, so they are kept in that mode)
         const selectedFolders = flattenedFolders.filter(folder =>
-          includeCompleted || folder.status !== Folder.Status.Dropped
+          includeCompleted || folder.effectiveActive
         );
 
         // Pre-filter active tags (inactive tags are kept when completed items are
         // requested so historical tag names still resolve)
-        const selectedTags = flattenedTags.filter(tag => includeCompleted || tag.active);
+        const selectedTags = flattenedTags.filter(tag => includeCompleted || tag.effectiveActive);
 
         // Select completed/dropped tasks, capped per project at the most recent
         // COMPLETED_TASK_CAP by completion (or drop) date.

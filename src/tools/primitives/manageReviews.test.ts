@@ -139,6 +139,101 @@ test('list_due accepts all and includeOnHold', () => {
   assert.equal(validateManageReviewsParams({ operation: 'list_due', all: true, includeOnHold: false }).valid, true);
 });
 
+// Run the actual listing script with the effective root-task status supplied
+// by OmniFocus, which can differ from a project's explicit status.
+const REVIEW_NOW = new Date('2026-10-02T12:00:00Z');
+const REVIEW_PAST = new Date('2026-09-01T12:00:00Z');
+const REVIEW_FUTURE = new Date('2026-11-01T12:00:00Z');
+
+function reviewProject(id: string, overrides: Record<string, any> = {}): any {
+  return {
+    id: { primaryKey: id },
+    name: id,
+    status: '[object Project.Status: Active]',
+    task: { taskStatus: 'Blocked' },
+    parentFolder: null,
+    reviewInterval: { unit: 'weeks', steps: 1 },
+    nextReviewDate: REVIEW_PAST,
+    lastReviewDate: REVIEW_PAST,
+    ...overrides
+  };
+}
+
+function runListDue(projects: any[], args: Record<string, any> = {}): any {
+  const Clock = class extends Date {
+    constructor(value: string | number = REVIEW_NOW.getTime()) { super(value); }
+  };
+  const fn = new Function('args', 'flattenedProjects', 'Task', 'Date', LIST_DUE_REVIEWS_SCRIPT);
+  return JSON.parse(fn(args, projects, { Status: { Dropped: 'Dropped' } }, Clock));
+}
+
+for (const status of ['Active', 'OnHold']) {
+  for (const depth of [1, 3]) {
+    for (const args of [{}, { all: true }, { all: true, includeOnHold: false }]) {
+      test(`list_due excludes ${status} projects under dropped ancestry (depth ${depth}, ${JSON.stringify(args)})`, () => {
+        let folder: any = { name: 'Historical', parent: null, status: 'Dropped' };
+        for (let i = 1; i < depth; i++) {
+          folder = { name: `Nested ${i}`, parent: folder, status: 'Active' };
+        }
+        const hidden = reviewProject('historical', {
+          status: `[object Project.Status: ${status}]`,
+          parentFolder: folder,
+          task: { taskStatus: 'Dropped' }
+        });
+        const result = runListDue([hidden, reviewProject('current')], args);
+        assert.equal(result.success, true);
+        assert.deepEqual(result.projects.map((p: any) => p.id), ['current']);
+        assert.equal(result.scanned, 2, 'scanned remains the number of projects inspected');
+      });
+    }
+  }
+}
+
+test('list_due retains available, empty, blocked and deferred active projects', () => {
+  const projects = ['Available', 'Next', 'Blocked', 'DueSoon', 'Overdue'].map(taskStatus =>
+    reviewProject(taskStatus, { task: { taskStatus } })
+  );
+  projects.push(reviewProject('deferred', {
+    task: { taskStatus: 'Blocked', effectiveDeferDate: REVIEW_FUTURE },
+    parentFolder: { name: 'Current', parent: null, status: 'Active' }
+  }));
+  assert.deepEqual(runListDue(projects).projects.map((p: any) => p.id), projects.map(p => p.id.primaryKey));
+});
+
+test('list_due includes on-hold projects by default and excludes them only when requested', () => {
+  const projects = [reviewProject('active'), reviewProject('held', { status: '[object Project.Status: OnHold]' })];
+  assert.deepEqual(runListDue(projects).projects.map((p: any) => p.id), ['active', 'held']);
+  assert.deepEqual(runListDue(projects, { includeOnHold: false }).projects.map((p: any) => p.id), ['active']);
+});
+
+test('list_due never includes explicitly finished projects, even with all enabled', () => {
+  const projects = ['Done', 'Completed', 'Dropped'].map(status => reviewProject(status, {
+    status: `[object Project.Status: ${status}]`,
+    task: { taskStatus: status === 'Dropped' ? 'Dropped' : 'Completed' }
+  }));
+  assert.deepEqual(runListDue(projects).projects, []);
+  assert.deepEqual(runListDue(projects, { all: true }).projects, []);
+});
+
+test('list_due preserves due-date boundaries and all-scheduled behavior', () => {
+  const projects = [
+    reviewProject('past'),
+    reviewProject('now', { nextReviewDate: REVIEW_NOW }),
+    reviewProject('future', { nextReviewDate: REVIEW_FUTURE }),
+    reviewProject('interval-only', { nextReviewDate: null, lastReviewDate: null }),
+    reviewProject('unscheduled', { reviewInterval: null, nextReviewDate: null, lastReviewDate: null })
+  ];
+  assert.deepEqual(runListDue(projects).projects.map((p: any) => p.id), ['past', 'now']);
+  const all = runListDue(projects, { all: true });
+  assert.deepEqual(all.projects.map((p: any) => [p.id, p.dueForReview]), [
+    ['past', true], ['now', true], ['future', false], ['interval-only', false]
+  ]);
+});
+
+test('list_due returns an empty result for an empty database', () => {
+  assert.deepEqual(runListDue([]), { success: true, projects: [], scanned: 0 });
+});
+
 test('mark_reviewed rejects mixing the single and batch forms', () => {
   const v = validateManageReviewsParams({ operation: 'mark_reviewed', projectId: 'p1', projectIds: ['p2'] });
   assert.equal(v.valid, false);
