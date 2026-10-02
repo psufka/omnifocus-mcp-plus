@@ -1,11 +1,13 @@
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_PROJECT_ACTIONS } from '../../utils/projectActions.js';
 
 export interface GetProjectCountsParams {
   folder?: string;
 }
 
-export async function getProjectCounts(params: GetProjectCountsParams = {}): Promise<any> {
-  const script = `
+export const GET_PROJECT_COUNTS_SCRIPT = `
+    ${OMNIJS_PROJECT_ACTIONS}
+    const now = new Date();
     let projects = flattenedProjects.filter(() => true);
 
     if (args.folder) {
@@ -24,8 +26,7 @@ export async function getProjectCounts(params: GetProjectCountsParams = {}): Pro
     projects.forEach(p => {
       if (p.status === Project.Status.Active) {
         active++;
-        const remaining = p.flattenedTasks.some(t => t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped);
-        if (remaining && p.nextTask === null) stalled++;
+        if (p.task.taskStatus !== Task.Status.Dropped && __projectActions(p, now).noNextAction) stalled++;
       }
       else if (p.status === Project.Status.OnHold) onHold++;
       else if (p.status === Project.Status.Done) completed++;
@@ -42,5 +43,6 @@ export async function getProjectCounts(params: GetProjectCountsParams = {}): Pro
       stalled: stalled
     });
   `;
-  return await runOmniJs(script, params, { readOnly: true });
+export async function getProjectCounts(params: GetProjectCountsParams = {}): Promise<any> {
+  return await runOmniJs(GET_PROJECT_COUNTS_SCRIPT, params, { readOnly: true });
 }

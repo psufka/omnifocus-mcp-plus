@@ -89,7 +89,7 @@ test('every task walk in the analyze script filters out project root tasks', () 
   assert.ok(walks.length >= 2, 'expected at least two task walks in the script');
   assert.match(
     ANALYZE_SCRIPT,
-    /p\.flattenedTasks\.forEach\(function \(t\) \{ if \(__isRealTask\(t\) &&/,
+    /project\.flattenedTasks\.filter\(function \(t\) \{\s+return !t\.project &&/,
     'the per-project remaining count does not exclude the project root task'
   );
 });

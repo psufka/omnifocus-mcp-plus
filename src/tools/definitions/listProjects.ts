@@ -5,10 +5,10 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 
 export const schema = z.object({
   folder: z.string().optional().describe("Filter to projects within this folder name"),
-  status: z.enum(['active', 'on_hold', 'completed', 'dropped']).optional().describe("Filter by project status"),
+  status: z.enum(['active', 'on_hold', 'completed', 'dropped']).optional().describe("Filter by explicit project status, not inherited folder status"),
   completedBefore: optionalIsoDate(isoDateDescription("Only projects completed before this date")),
   completedAfter: optionalIsoDate(isoDateDescription("Only projects completed after this date")),
-  stalledOnly: z.boolean().optional().describe("Only return stalled projects (active with tasks but no next action)"),
+  stalledOnly: z.boolean().optional().describe("Only active, effectively non-dropped projects with remaining tasks but no available or future-deferred work"),
   sortBy: z.enum(['name', 'dueDate', 'completionDate', 'remainingTaskCount']).optional().describe("Sort field (default: name)"),
   sortOrder: z.enum(['asc', 'desc']).optional().describe("Sort order (default: asc)"),
   limit: z.number().min(1).max(500).optional().describe("Maximum number of projects to return (default: 100)")

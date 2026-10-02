@@ -1,5 +1,6 @@
 import { toLocalDateTimeString } from '../../utils/localDate.js';
 import { runOmniJs } from '../../utils/scriptExecution.js';
+import { OMNIJS_PROJECT_ACTIONS } from '../../utils/projectActions.js';
 
 export interface ListProjectsParams {
   folder?: string;
@@ -12,8 +13,9 @@ export interface ListProjectsParams {
   limit?: number;
 }
 
-export async function listProjects(params: ListProjectsParams = {}): Promise<any> {
-  const script = `
+export const LIST_PROJECTS_SCRIPT = `
+    ${OMNIJS_PROJECT_ACTIONS}
+    const now = new Date();
     const statusMap = {
       'active': Project.Status.Active,
       'on_hold': Project.Status.OnHold,
@@ -63,8 +65,8 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<any
     if (args.stalledOnly) {
       projects = projects.filter(p =>
         p.status === Project.Status.Active &&
-        p.flattenedTasks.some(t => t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped) &&
-        p.nextTask === null
+        p.task.taskStatus !== Task.Status.Dropped &&
+        __projectActions(p, now).noNextAction
       );
     }
 
@@ -77,8 +79,8 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<any
       else if (sortBy === 'dueDate') { valA = a.dueDate ? a.dueDate.getTime() : Infinity; valB = b.dueDate ? b.dueDate.getTime() : Infinity; }
       else if (sortBy === 'completionDate') { valA = a.completionDate ? a.completionDate.getTime() : Infinity; valB = b.completionDate ? b.completionDate.getTime() : Infinity; }
       else if (sortBy === 'remainingTaskCount') {
-        valA = a.flattenedTasks.filter(t => t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped).length;
-        valB = b.flattenedTasks.filter(t => t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped).length;
+        valA = __projectActions(a, now).remainingTasks;
+        valB = __projectActions(b, now).remainingTasks;
       }
       if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
       if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
@@ -92,15 +94,15 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<any
     // Map to output
     const result = projects.map(p => {
       const allTasks = p.flattenedTasks.filter(() => true);
-      const remaining = allTasks.filter(t => t.taskStatus !== Task.Status.Completed && t.taskStatus !== Task.Status.Dropped).length;
-      const isStalled = p.status === Project.Status.Active && remaining > 0 && p.nextTask === null;
+      const actions = __projectActions(p, now);
+      const isStalled = p.status === Project.Status.Active && p.task.taskStatus !== Task.Status.Dropped && actions.noNextAction;
       return {
         id: p.id.primaryKey,
         name: p.name,
         status: statusNameMap[p.status] || 'unknown',
         folderName: p.parentFolder ? p.parentFolder.name : null,
         taskCount: allTasks.length,
-        remainingTaskCount: remaining,
+        remainingTaskCount: actions.remainingTasks,
         dueDate: p.dueDate ? p.dueDate.toISOString() : null,
         completionDate: p.completionDate ? p.completionDate.toISOString() : null,
         sequential: p.sequential,
@@ -111,7 +113,8 @@ export async function listProjects(params: ListProjectsParams = {}): Promise<any
 
     return JSON.stringify({ success: true, projects: result, count: result.length });
   `;
-  return await runOmniJs(script, { ...params,
+export async function listProjects(params: ListProjectsParams = {}): Promise<any> {
+  return await runOmniJs(LIST_PROJECTS_SCRIPT, { ...params,
     ...(params.completedBefore ? { completedBefore: toLocalDateTimeString(params.completedBefore) } : {}),
     ...(params.completedAfter ? { completedAfter: toLocalDateTimeString(params.completedAfter) } : {})
   }, { readOnly: true });
