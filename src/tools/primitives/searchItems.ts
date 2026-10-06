@@ -119,6 +119,8 @@ export const SEARCH_ITEMS_SCRIPT = `
     results.project = collect(flattenedProjects, function (project) {
       var status = projectStatusName[project.status] || 'unknown';
       if (!includeCompleted && (status === 'completed' || status === 'dropped')) { return null; }
+      // The root task also reflects a dropped containing folder.
+      if (!includeCompleted && project.task.taskStatus === Task.Status.Dropped) { return null; }
       var where = matchedIn(project.name, project.note, true);
       if (!where) { return null; }
       return {

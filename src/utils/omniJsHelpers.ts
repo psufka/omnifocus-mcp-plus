@@ -35,7 +35,10 @@ export const OMNIJS_LOOKUP_HELPERS = `
 
   function __isActive(o) {
     var l = __statusLabel(o);
-    return l !== 'Dropped' && l !== 'Completed' && l !== 'Done';
+    // Folders inherit inactivity; projects expose inherited dropping through
+    // their root task. Blocked/deferred/on-hold projects remain live matches.
+    return l !== 'Dropped' && l !== 'Completed' && l !== 'Done' &&
+      o.effectiveActive !== false && (!o.task || __statusLabel(o.task) !== 'Dropped');
   }
 
   function __matchList(matches) {

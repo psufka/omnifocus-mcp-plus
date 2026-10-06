@@ -274,6 +274,8 @@ export const LIST_DUE_REVIEWS_SCRIPT = `
     const p = projects[i];
     const status = __projectStatusLabel(p);
 
+    // The root task inherits Dropped from any enclosing dropped folder.
+    if (p.task.taskStatus === Task.Status.Dropped) { continue; }
     // Finished projects are never reviewable.
     if (status === 'Done' || status === 'Completed' || status === 'Dropped') { continue; }
     if (status === 'OnHold' && !includeOnHold) { continue; }

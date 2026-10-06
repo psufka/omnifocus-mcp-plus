@@ -93,3 +93,95 @@ test('helper source survives the runOmniJs escaping round-trip', () => {
   assert.ok(!OMNIJS_LOOKUP_HELPERS.includes('$') || !/\$(?!_)/.test(OMNIJS_LOOKUP_HELPERS));
   assert.ok(!OMNIJS_LOOKUP_HELPERS.includes('\\'));
 });
+
+// Model the native effectiveActive property: on-hold objects stay active,
+// while a dropped ancestor makes an otherwise active child inactive.
+function mockContainer(id: string, kind = 'Folder', status = 'Active', parent: any = null): any {
+  return {
+    ...mockItem(id, 'Shared'),
+    status: `[object ${kind}.Status: ${status}]`,
+    parent,
+    get effectiveActive(): boolean {
+      return status !== 'Dropped' && (!parent || parent.effectiveActive);
+    },
+  };
+}
+
+function mockProject(id: string, status = 'Active', rootStatus = 'Blocked', parentFolder: any = null) {
+  return {
+    ...mockItem(id, 'Shared'),
+    status: `[object Project.Status: ${status}]`,
+    parentFolder,
+    task: {
+      get taskStatus() {
+        const effective = parentFolder && !parentFolder.effectiveActive ? 'Dropped' : rootStatus;
+        return `[object Task.Status: ${effective}]`;
+      },
+    },
+  };
+}
+
+for (const method of ['resolveByIdOrName', 'resolveByNameOrId'] as const) {
+  const byName = (items: any[], label: string) => {
+    const helpers = loadHelpers();
+    return method === 'resolveByIdOrName'
+      ? helpers.resolveByIdOrName(items, null, 'Shared', label)
+      : helpers.resolveByNameOrId(items, 'SHARED', label);
+  };
+  const byId = (items: any[], id: string, label: string) => {
+    const helpers = loadHelpers();
+    return method === 'resolveByIdOrName'
+      ? helpers.resolveByIdOrName(items, id, 'Shared', label)
+      : helpers.resolveByNameOrId(items, id, label);
+  };
+
+  test(`${method}: folder and tag ties account for direct and nested dropping`, () => {
+    for (const kind of ['Folder', 'Tag']) {
+      const droppedParent = mockContainer('archive', kind, 'Dropped');
+      const nestedParent = mockContainer('nested', kind, 'Active', droppedParent);
+      const inactive = [
+        mockContainer('directly-dropped', kind, 'Dropped'),
+        mockContainer('in-dropped-parent', kind, 'Active', droppedParent),
+        mockContainer('in-dropped-ancestor', kind, 'Active', nestedParent),
+      ];
+      // On-hold tags are still live targets, just as on-hold projects are.
+      const live = mockContainer('live', kind, kind === 'Tag' ? 'OnHold' : 'Active');
+      assert.equal(byName([...inactive, live], kind).item, live);
+      for (const historical of inactive) {
+        assert.equal(byId([historical, live], historical.id.primaryKey, kind).item, historical);
+        assert.equal(byName([historical], kind).item, historical);
+      }
+      assert.match(byName(inactive, kind).error, /Ambiguous/);
+      assert.match(byName([...inactive, live, mockContainer('other-live', kind)], kind).error, /Ambiguous/);
+    }
+  });
+
+  test(`${method}: project ties exclude dropped ancestors without excluding blocked or deferred work`, () => {
+    const droppedParent = mockContainer('archive', 'Folder', 'Dropped');
+    const nestedParent = mockContainer('nested', 'Folder', 'Active', droppedParent);
+    const historical = [
+      mockProject('dropped', 'Dropped', 'Dropped'),
+      mockProject('completed', 'Done', 'Completed'),
+      mockProject('dropped-parent', 'Active', 'Blocked', droppedParent),
+      mockProject('dropped-ancestor', 'OnHold', 'Blocked', nestedParent),
+    ];
+    for (const [status, rootStatus, deferred] of [
+      ['Active', 'Available', false],
+      ['Active', 'Blocked', false],
+      ['Active', 'Blocked', true],
+      ['OnHold', 'Blocked', false],
+    ] as const) {
+      const live = {
+        ...mockProject('live', status, rootStatus),
+        deferDate: deferred ? new Date('2099-01-01') : null,
+      };
+      assert.equal(byName([...historical, live], 'project').item, live, `${status}/${rootStatus}/deferred=${deferred}`);
+      assert.match(byName([live, mockProject('other-live')], 'project').error, /Ambiguous/);
+      for (const old of historical) {
+        assert.equal(byId([old, live], old.id.primaryKey, 'project').item, old);
+        assert.equal(byName([old], 'project').item, old);
+      }
+    }
+    assert.match(byName(historical, 'project').error, /Ambiguous/);
+  });
+}

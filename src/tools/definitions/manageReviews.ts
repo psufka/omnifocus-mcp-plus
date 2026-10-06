@@ -22,7 +22,7 @@ export const schema = z.object({
     "list_due only. false (default) returns only projects whose next review date has arrived; true returns every reviewable project that has a review schedule, due or not."
   ),
   includeOnHold: z.boolean().optional().describe(
-    "list_due only. Include on-hold projects (default true — on-hold projects are still reviewable in OmniFocus). Completed and dropped projects are never returned."
+    "list_due only: include on-hold projects (default true). Completed or dropped projects and projects in dropped folders are excluded, even with all: true."
   ),
 
   // --- mark_reviewed (single) and set_schedule ---

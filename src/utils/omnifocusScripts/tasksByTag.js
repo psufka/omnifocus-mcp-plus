@@ -47,7 +47,7 @@
     };
     
     // Get all active tags for reference
-    const allTags = flattenedTags.filter(tag => tag.active);
+    const allTags = flattenedTags.filter(tag => tag.effectiveActive);
     exportData.availableTags = allTags.map(tag => tag.name).sort();
     
     console.log(`Searching for tags matching "${tagName}" (exact: ${exactMatch})`);

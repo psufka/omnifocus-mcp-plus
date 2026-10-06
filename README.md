@@ -136,6 +136,13 @@ and [Omni's API lookup announcement](https://discourse.omnigroup.com/t/new-omni-
 | `get_project_counts` | Aggregate counts by status |
 | `manage_reviews` | GTD review workflow: list due, mark reviewed (batch-capable), set schedule |
 
+`manage_reviews` excludes projects inside dropped folders, including nested folders,
+even with `all: true`. Default `search_items` results and `dump_database` exports
+also exclude these projects. Use `includeCompleted: true` for historical searches
+or `hideCompleted: false` for historical exports. Project status listings and
+counts report the project's explicit status, which can remain active inside a
+dropped folder.
+
 ### App Control
 | Tool | Description |
 |------|-------------|
