@@ -1,6 +1,7 @@
 import { withMacWideSlot, type Lease } from './processLock.js';
 import { recordToolData } from './toolResult.js';
 import { expandScriptHelpers } from './taskQueryHelpers.js';
+import { buildPerspectiveWindowScript } from './perspectiveWindow.js';
 import { spawn } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -457,7 +458,7 @@ export async function runOmniJs(
 export async function executeOmniFocusScript(
   scriptPath: string,
   args?: any,
-  options?: ScriptExecutionOptions
+  options?: ScriptExecutionOptions & { perspectiveWindow?: string }
 ): Promise<any> {
   try {
     // Get the actual script path (existing code remains the same)
@@ -488,7 +489,9 @@ export async function executeOmniFocusScript(
     const escapedScript = escapeForJxaTemplate(scriptContent);
 
     // Create a JXA script that will execute our OmniJS script in OmniFocus
-    const jxaScript = `
+    const jxaScript = options?.perspectiveWindow !== undefined
+      ? buildPerspectiveWindowScript(scriptContent, options.perspectiveWindow)
+      : `
     function run() {
       try {
         const app = Application('OmniFocus');

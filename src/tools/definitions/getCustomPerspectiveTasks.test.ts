@@ -108,30 +108,4 @@ test('limiting the input list truncates the rendered tree', () => {
   assert.equal(tree.rootTasks[0].children[0].id, 'c1');
 });
 
-// --- perspective window save/restore (OmniJS source-pattern smoke checks) ---
-
-test('getCustomPerspectiveTasks.js restores the front window perspective', () => {
-  const src = readSource('../../utils/omnifocusScripts/getCustomPerspectiveTasks.js');
-
-  assert.match(src, /const previousPerspective = targetWindow\.perspective/, 'current perspective is not saved');
-  assert.match(src, /\}\s*finally\s*\{/, 'perspective restore is not in a finally block');
-  assert.match(src, /targetWindow\.perspective = previousPerspective/, 'perspective is never restored');
-
-  // The save must happen before the switch.
-  const saveIndex = src.indexOf('const previousPerspective');
-  const switchIndex = src.indexOf('targetWindow.perspective = perspective;');
-  const restoreIndex = src.indexOf('targetWindow.perspective = previousPerspective');
-  assert.ok(saveIndex !== -1 && switchIndex !== -1 && restoreIndex !== -1, 'expected save, switch and restore statements');
-  assert.ok(saveIndex < switchIndex, 'perspective is switched before the previous one is saved');
-  assert.ok(switchIndex < restoreIndex, 'restore does not follow the switch');
-
-  // No direct write to document.windows[0].perspective any more.
-  assert.doesNotMatch(src, /document\.windows\[0\]\.perspective = /, 'script still writes the perspective without saving it');
-});
-
-test('getCustomPerspectiveTasks.js errors clearly when no window is open', () => {
-  const src = readSource('../../utils/omnifocusScripts/getCustomPerspectiveTasks.js');
-
-  assert.match(src, /document\.windows\.length === 0/, 'missing empty-window guard');
-  assert.match(src, /OmniFocus has no open window; open one and retry/, 'missing no-window error message');
-});
+// Window isolation and cleanup are exercised behaviorally in perspectiveWindow.test.ts.
