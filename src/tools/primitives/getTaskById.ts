@@ -27,6 +27,14 @@ export interface TaskInfo {
   dropped: boolean;
   taskStatus: string;
   estimatedMinutes?: number;
+  repetitionRule?: {
+    ruleString: string;
+    method: string | null;
+    scheduleType: string | null;
+    anchorDateKey: string | null;
+    catchUpAutomatically: boolean;
+  } | null;
+  repetitionRuleError?: string;
 }
 
 export async function getTaskById(params: GetTaskByIdParams): Promise<{ success: boolean, task?: TaskInfo, error?: string }> {
@@ -53,6 +61,29 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
 
     let plannedDate = null;
     try { plannedDate = task.plannedDate ? task.plannedDate.toISOString() : null; } catch(e) {}
+
+    // Read the repeat rule without changing the task or opening its inspector.
+    // Null means verified non-repeating; an unavailable read is explicit.
+    function enumLabel(value) {
+      if (value === undefined || value === null) return null;
+      const text = String(value);
+      const colon = text.indexOf(': ');
+      return colon >= 0 && text.endsWith(']') ? text.slice(colon + 2, -1) : text;
+    }
+    let repetitionRule;
+    let repetitionRuleError;
+    try {
+      const rule = task.repetitionRule;
+      repetitionRule = rule ? {
+        ruleString: rule.ruleString,
+        method: enumLabel(rule.method),
+        scheduleType: enumLabel(rule.scheduleType),
+        anchorDateKey: enumLabel(rule.anchorDateKey),
+        catchUpAutomatically: rule.catchUpAutomatically
+      } : null;
+    } catch (error) {
+      repetitionRuleError = String(error);
+    }
 
     // Full status string, same mapping list_subtasks returns — a completed
     // boolean alone cannot distinguish Dropped from Available.
@@ -88,7 +119,9 @@ export async function getTaskById(params: GetTaskByIdParams): Promise<{ success:
         completed: task.taskStatus === Task.Status.Completed,
         dropped: task.taskStatus === Task.Status.Dropped,
         taskStatus: statusMap[task.taskStatus] || 'Unknown',
-        estimatedMinutes: task.estimatedMinutes || undefined
+        estimatedMinutes: task.estimatedMinutes || undefined,
+        repetitionRule: repetitionRule,
+        repetitionRuleError: repetitionRuleError
       }
     });
   `;

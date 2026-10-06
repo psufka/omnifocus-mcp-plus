@@ -72,6 +72,13 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
         infoText += `• **Planned**: ${isNaN(d.getTime()) ? task.plannedDate : d.toLocaleString()}\n`;
       }
 
+      if (task.repetitionRule) {
+        const rule = task.repetitionRule;
+        infoText += `• **Repeat**: ${rule.ruleString} (${rule.scheduleType || rule.method || 'unknown'}; anchor ${rule.anchorDateKey || 'unknown'})\n`;
+      } else if (task.repetitionRuleError) {
+        infoText += `• **Repeat**: unavailable — ${task.repetitionRuleError}\n`;
+      }
+
       infoText += `• **Has Children**: ${task.hasChildren ? `Yes (${task.childrenCount} subtasks)` : 'No'}\n`;
 
       return {

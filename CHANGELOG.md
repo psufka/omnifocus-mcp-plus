@@ -2,6 +2,15 @@
 
 All notable changes to omnifocus-mcp-plus are documented here.
 
+## [Unreleased]
+
+### Fixed
+- `get_task_by_id` now returns recurrence details in its structured response: rule string, repetition method, schedule type, anchor date key, and automatic catch-up setting. Repeat details also appear in readable output, allowing clients to inspect schedules without opening the OmniFocus inspector.
+- Task reads distinguish a verified non-repeating task (`repetitionRule: null`) from an unavailable recurrence read (`repetitionRuleError`). Reading recurrence never changes the task or its schedule.
+
+### Verification
+- Added behavioral regression tests for fixed schedules, completion-based schedules, non-repeating tasks, and unavailable recurrence metadata. All 865 tests and the production build passed; a live read confirmed the existing every-other-day rule and due-date anchor.
+
 ## [0.7.0] - 2026-09-14
 
 ### Added
