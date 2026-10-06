@@ -24,7 +24,7 @@ export const schema = z.object({
       'un-estimated tasks plus project status counts and recent completions. ' +
       'velocity = per-day completed/created counts over a trailing window. ' +
       'overdue_clusters = overdue tasks grouped by project and by tag. ' +
-      'stalled_projects = active projects with no next action and/or no recent activity.'
+      'stalled_projects = active projects with no available or future-deferred work and/or no recent activity.'
     ),
   velocity: z
     .object({

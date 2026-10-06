@@ -1,4 +1,5 @@
 import { OMNIJS_TASK_QUERY_HELPERS } from '../../utils/taskQueryHelpers.js';
+import { OMNIJS_PROJECT_ACTIONS } from '../../utils/projectActions.js';
 import { runOmniJs } from '../../utils/scriptExecution.js';
 
 /**
@@ -68,6 +69,7 @@ export const STALLED_PROJECT_ROW_CAP = 50;
 
 export const ANALYZE_SCRIPT = `
   ${OMNIJS_TASK_QUERY_HELPERS}
+  ${OMNIJS_PROJECT_ACTIONS}
   function __isFinished(t) {
     return t.taskStatus === Task.Status.Completed || t.taskStatus === Task.Status.Dropped;
   }
@@ -138,7 +140,7 @@ export const ANALYZE_SCRIPT = `
     flattenedProjects.forEach(function (p) {
       if (p.status === Project.Status.Active) {
         pActive++;
-        if (p.nextTask === null) { pNoNext++; }
+        if (p.task.taskStatus !== Task.Status.Dropped && __projectActions(p, now).noNextAction) { pNoNext++; }
       } else if (p.status === Project.Status.OnHold) { pOnHold++; }
       else if (p.status === Project.Status.Done) { pDone++; }
       else if (p.status === Project.Status.Dropped) { pDropped++; }
@@ -290,28 +292,24 @@ export const ANALYZE_SCRIPT = `
       var isActive = p.status === Project.Status.Active;
       var isOnHold = p.status === Project.Status.OnHold;
       if (!isActive && !(includeOnHold && isOnHold)) { return; }
+      if (p.task.taskStatus === Task.Status.Dropped) { return; }
       scanned++;
 
       // Project itself has no .modified — the root task shares the project's
       // primaryKey and carries the timestamps.
       var root = p.task;
       var lastActivity = root ? root.modified : null;
-      var noNextAction = p.nextTask === null;
+      var actions = __projectActions(p, now);
+      var noNextAction = actions.noNextAction;
       var stale = lastActivity ? lastActivity < threshold : false;
       if (!noNextAction && !stale) { return; }
-
-      var remaining = 0;
-      // Same root-task exclusion every other task count uses: a project root
-      // task is a member of flattenedTasks and would inflate the remaining
-      // count by one for every project.
-      p.flattenedTasks.forEach(function (t) { if (__isRealTask(t) && !__isFinished(t)) { remaining++; } });
 
       rows.push({
         id: p.id.primaryKey,
         name: p.name,
         folderPath: __folderPath(p),
         status: isActive ? 'Active' : 'OnHold',
-        remainingTasks: remaining,
+        remainingTasks: actions.remainingTasks,
         noNextAction: noNextAction,
         lastActivityIso: __iso(lastActivity),
         lastActivityStale: stale
@@ -434,9 +432,9 @@ export function renderHealthSnapshot(data: any): string {
     '_Definitions: project roots ' + (data.includeProjectRoots ? 'included' : 'excluded') + '. Dates: ' + (data.dateMode || 'direct') + '. "Overdue" and "Due today" overlap ' +
     'for a task whose due time already passed today. "Completed in last 7 days" counts ' +
     `completions from ${localDate(data.completedWindowStartIso)} at local midnight through the observation time above, inclusive. ` +
-    '"Active with no next action" is project.nextTask === null — it means the project has remaining ' +
-    'tasks but none is currently actionable. A project with no remaining tasks reports its own root ' +
-    'task as nextTask, so it is NOT counted here._'
+    'Project status totals use each project\'s explicit status. "Active with no next action" excludes ' +
+    'effectively dropped projects and means remaining tasks exist but none is available or has a future ' +
+    'effective defer date. Empty projects and single-action lists with available work are not counted._'
   );
 
   return lines.join('\n');
@@ -628,9 +626,9 @@ export function renderStalledProjects(data: any): string {
   lines.push('');
   lines.push(
     '_Definitions: the two signal columns are INDEPENDENT, not a combined verdict. ' +
-    '"No next action" is project.nextTask === null — it means the project has remaining tasks but ' +
-    'none is currently actionable. A project with Remaining 0 reports its own root task as nextTask, ' +
-    'so it shows "no" here; read the two columns against Remaining. "Last activity" is the ' +
+    '"No next action" means remaining tasks exist but none is available or has a future effective defer date. ' +
+    'Empty projects and single-action lists with available work show "no". Effectively dropped projects ' +
+    'are excluded. "Last activity" is the ' +
     'modification date of the project\'s root task (Project itself carries no modification date). ' +
     'A project is listed when EITHER signal fires; rows are sorted oldest activity first._'
   );

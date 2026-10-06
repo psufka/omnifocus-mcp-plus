@@ -4,7 +4,7 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 
 export const schema = z.object({
   folder: z.string().optional().describe("Optional folder name to scope counts to")
-}).strict();
+}).strict().describe("Project counts use explicit status. Stalled excludes effectively dropped projects and projects with available or future-deferred work.");
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra<any, any>) {
   try {
