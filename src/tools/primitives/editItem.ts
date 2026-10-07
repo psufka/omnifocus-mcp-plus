@@ -666,9 +666,8 @@ export async function editItem(params: EditItemParams): Promise<{
       name: result.name,
       changedProperties: result.changedProperties,
       warnings: result.warnings,
-      // Absent on the error paths (the script returns before verification) —
-      // only claim verification when the script actually reported it.
-      verified: result.success ? result.verified === true : undefined,
+      // Previews and errors return before post-write verification.
+      verified: result.success && !result.dryRun ? result.verified === true : undefined,
       mismatches: mismatches.length > 0 ? mismatches : undefined,
       error: result.error
     };
